@@ -1,6 +1,6 @@
 <script lang="ts">
-  import { VisXYContainer, VisLine, VisAxis, VisTooltip } from '@unovis/svelte';
-  import { Line } from '@unovis/ts';
+  import { VisXYContainer, VisLine, VisAxis, VisTooltip, VisCrosshair } from '@unovis/svelte';
+  import { Line, Crosshair } from '@unovis/ts';
   
   // Define the data type expected
   type DataRecord = {
@@ -114,34 +114,25 @@
   const x = (d: DataRecord) => d.x;
   const y = (d: DataRecord) => d.y;
   
-  // Configure tooltip
-  const tooltipConfig = {
-    trigger: 'hover',
-    content: (d: any) => {
-      if (!d || !d[0]) return '';
-      const datum = d[0].datum;
-      let formattedValue = datum.y.toFixed(2);
-      
-      // Format the value based on the metric type
-      if (label.includes('Temperature')) {
-        formattedValue = `${formattedValue}°F`;
-      } else if (label.includes('CO2')) {
-        formattedValue = `${formattedValue} ppm`;
-      } else if (label.includes('Humidity')) {
-        formattedValue = `${formattedValue}%`;
-      } else if (label.includes('VOC')) {
-        formattedValue = `${formattedValue} ppb`;
-      } else if (label.includes('PM2.5')) {
-        formattedValue = `${formattedValue} μg/m³`;
-      }
-      
-      return `
-        <div style="padding: 8px;">
-          <div style="font-weight: bold;">${new Date(datum.x).toLocaleString()}</div>
-          <div>${label}: ${formattedValue}</div>
-        </div>
-      `;
-    }
+  // Format a raw y value with the correct unit for this chart
+  function formatValue(y: number): string {
+    const v = y.toFixed(2);
+    if (label.includes('Temperature')) return `${v}°F`;
+    if (label.includes('CO2'))         return `${v} ppm`;
+    if (label.includes('Humidity'))    return `${v}%`;
+    if (label.includes('VOC Index'))   return v;
+    if (label.includes('PM2.5'))       return `${v} μg/m³`;
+    return v;
+  }
+
+  // Crosshair tooltip — triggered when the crosshair circle is hovered
+  $: tooltipTriggers = {
+    [Crosshair.selectors.circle]: (d: DataRecord) => `
+      <div style="padding:8px;font-family:sans-serif;min-width:160px;">
+        <div style="font-weight:600;margin-bottom:4px;">${new Date(d.x).toLocaleString()}</div>
+        <div>${label}: <strong>${formatValue(d.y)}</strong></div>
+      </div>
+    `
   };
 </script>
 
@@ -194,7 +185,8 @@
           tickTextColor={yAxisOptions.tickTextColor}
           tickTextFontSize={yAxisOptions.tickTextFontSize}
         />
-        <VisTooltip config={tooltipConfig} />
+        <VisCrosshair {x} {y} color={color} />
+        <VisTooltip triggers={tooltipTriggers} />
       </VisXYContainer>
     {/if}
   </div>
