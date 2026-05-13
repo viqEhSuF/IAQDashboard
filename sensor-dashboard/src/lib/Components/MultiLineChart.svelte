@@ -12,42 +12,31 @@
   export let series: SeriesConfig[] = [];
   export let height: number = 380;
 
-  // Join all series onto a shared x-grid: { x, y0, y1, y2, ... }
-  // VisLine per series uses y = d => d[`y${i}`]; NaN renders as a gap.
-  type JoinedRecord = { x: number } & Record<string, number>;
+  const x = (d: DataRecord) => d.x;
+  const y = (d: DataRecord) => d.y;
 
-  $: joinedData = (() => {
-    if (series.length === 0) return [] as JoinedRecord[];
-    const xSet = new Set<number>();
-    for (const s of series) for (const pt of s.data) xSet.add(pt.x);
-    const allX = Array.from(xSet).sort((a, b) => a - b);
-    const maps = series.map(s => {
-      const m = new Map<number, number>();
-      for (const pt of s.data) m.set(pt.x, pt.y);
-      return m;
-    });
-    return allX.map(x => {
-      const rec: JoinedRecord = { x };
-      maps.forEach((m, i) => { rec[`y${i}`] = m.has(x) ? m.get(x)! : NaN; });
-      return rec;
-    });
-  })();
+  $: activeSeries = series.filter(s => s.data.length > 0);
 
-  const x = (d: JoinedRecord) => d.x;
+  // Container uses the densest series for the x-scale and crosshair snapping
+  $: containerData = activeSeries.reduce(
+    (best, s) => s.data.length > best.data.length ? s : best,
+    activeSeries[0] ?? { data: [], color: '', label: '' }
+  ).data;
 
-  // Stable accessor array — avoids Unovis re-renders from new function refs each tick
-  $: yAccessors = series.map((_, i) => (d: JoinedRecord) => d[`y${i}`]);
-
-  $: crosshairTemplate = (d: JoinedRecord) => {
+  // Crosshair tooltip: nearest-neighbour lookup into every series at the hovered x
+  $: crosshairTemplate = (d: DataRecord) => {
     const time = new Date(d.x).toLocaleString(undefined, {
       month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
     });
-    const rows = series.map((s, i) => {
-      const val = d[`y${i}`];
-      if (isNaN(val)) return '';
+    const rows = activeSeries.map(s => {
+      const nearest = s.data.reduce((best, cur) =>
+        Math.abs(cur.x - d.x) < Math.abs(best.x - d.x) ? cur : best,
+        s.data[0]
+      );
+      if (!nearest) return '';
       return `<div style="display:flex;align-items:center;gap:6px;margin-top:3px">
         <span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${s.color};flex-shrink:0"></span>
-        <span style="font-size:0.8125rem;color:#374151">${s.label}: <strong>${val.toFixed(2)}</strong></span>
+        <span style="font-size:0.8125rem;color:#374151">${s.label}: <strong>${nearest.y.toFixed(2)}</strong></span>
       </div>`;
     }).join('');
     return `<div style="padding:8px 10px;font-family:sans-serif;min-width:180px">
@@ -61,14 +50,15 @@
 </script>
 
 <div class="multi-chart">
-  {#if joinedData.length === 0}
+  {#if activeSeries.length === 0}
     <div class="empty">No data to display</div>
   {:else}
-    <VisXYContainer data={joinedData} {height}>
-      {#each series as s, i}
+    <VisXYContainer data={containerData} {height}>
+      {#each activeSeries as s}
         <VisLine
+          data={s.data}
           {x}
-          y={yAccessors[i]}
+          {y}
           curveType="monotoneX"
           lineWidth={2}
           color={s.color}
@@ -77,12 +67,12 @@
       {/each}
       <VisAxis type="x" position="bottom" label="Time" numTicks={6} gridLine={true} tickFormat={xTickFormat} />
       <VisAxis type="y" position="left" numTicks={5} gridLine={true} />
-      <VisCrosshair {x} y={yAccessors[0]} color={series[0]?.color ?? '#1d4ed8'} template={crosshairTemplate} />
+      <VisCrosshair {x} {y} color={activeSeries[0]?.color ?? '#1d4ed8'} template={crosshairTemplate} />
       <VisTooltip />
     </VisXYContainer>
 
     <div class="legend">
-      {#each series as s}
+      {#each activeSeries as s}
         <div class="legend-item">
           <span class="swatch" style="background:{s.color}"></span>
           <span class="legend-label">{s.label}</span>
