@@ -89,6 +89,39 @@
         },
         ...yAxisOptions
       };
+    } else if (label.includes('NOx Index')) {
+      yAxisOptions = {
+        ...{
+          minValue: 1,
+          maxValue: 500,
+          numTicks: 5,
+          gridLine: true,
+          tickFormat: (d) => `${d}`
+        },
+        ...yAxisOptions
+      };
+    } else if (label.includes('HCHO')) {
+      yAxisOptions = {
+        ...{
+          minValue: 0,
+          maxValue: undefined,
+          numTicks: 5,
+          gridLine: true,
+          tickFormat: (d) => `${d} ppb`
+        },
+        ...yAxisOptions
+      };
+    } else if (label.includes('Dew Point')) {
+      yAxisOptions = {
+        ...{
+          minValue: undefined,
+          maxValue: undefined,
+          numTicks: 5,
+          gridLine: true,
+          tickFormat: (d) => `${d}°F`
+        },
+        ...yAxisOptions
+      };
     }
     
     // Default X-axis options (time-based)
@@ -117,11 +150,14 @@
   // Format a raw y value with the correct unit for this chart
   function formatValue(y: number): string {
     const v = y.toFixed(2);
-    if (label.includes('Temperature')) return `${v}°F`;
-    if (label.includes('CO2'))         return `${v} ppm`;
-    if (label.includes('Humidity'))    return `${v}%`;
-    if (label.includes('VOC Index'))   return v;
-    if (label.includes('PM2.5'))       return `${v} μg/m³`;
+    if (label.includes('Temperature'))  return `${v}°F`;
+    if (label.includes('CO2'))          return `${v} ppm`;
+    if (label.includes('Humidity'))     return `${v}%`;
+    if (label.includes('VOC Index'))    return v;
+    if (label.includes('NOx Index'))    return v;
+    if (label.includes('HCHO'))         return `${v} ppb`;
+    if (label.includes('Dew Point'))    return `${v}°F`;
+    if (label.includes('PM2.5'))        return `${v} μg/m³`;
     return v;
   }
 

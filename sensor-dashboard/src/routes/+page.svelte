@@ -17,6 +17,9 @@
   let humidityChart: DataRecord[] = [];
   let vocChart: DataRecord[] = [];
   let pmassChart: DataRecord[] = [];
+  let noxChart: DataRecord[] = [];
+  let hchoChart: DataRecord[] = [];
+  let dpChart: DataRecord[] = [];
   let loading = true;
   let error: string | null = null;
 
@@ -94,6 +97,21 @@
   $: pmAxisOptions = {
     minValue: 0,
     maxValue: pmassChart.length ? Math.max(...pmassChart.map(d => d.y).filter(v => !isNaN(v))) * 1.2 : 50,
+  };
+
+  $: noxAxisOptions = {
+    minValue: 1,
+    maxValue: 500,
+  };
+
+  $: hchoAxisOptions = {
+    minValue: 0,
+    maxValue: hchoChart.length ? Math.max(...hchoChart.map(d => d.y).filter(v => !isNaN(v))) * 1.2 : 100,
+  };
+
+  $: dpAxisOptions = {
+    minValue: dpChart.length ? Math.min(...dpChart.map(d => d.y).filter(v => !isNaN(v))) - 5 : 30,
+    maxValue: dpChart.length ? Math.max(...dpChart.map(d => d.y).filter(v => !isNaN(v))) + 5 : 70,
   };
   
   // Set default date range to last 24 hours
@@ -205,6 +223,9 @@
     humidityChart = createTimeSeriesData(sensorData, 'rH');
     vocChart = createTimeSeriesData(sensorData, 'VOC');
     pmassChart = createTimeSeriesData(sensorData, 'pmass25');
+    noxChart = createTimeSeriesData(sensorData, 'NOx');
+    hchoChart = createTimeSeriesData(sensorData, 'HCHO');
+    dpChart = createTimeSeriesData(sensorData, 'indoorTd');
   }
   
   function createTimeSeriesData(data: NormalizedSensorData[], field: keyof NormalizedSensorData): DataRecord[] {
@@ -423,11 +444,47 @@
       
       <section class="bg-white shadow rounded-lg p-4">
         <h2 class="text-xl font-semibold mb-2">Particulate Matter</h2>
-        <LineChart 
-          data={pmassChart} 
-          label="PM2.5 (μg/m³)" 
+        <LineChart
+          data={pmassChart}
+          label="PM2.5 (μg/m³)"
           color="#f59e0b"
           yAxisOptions={pmAxisOptions}
+          xAxisOptions={xAxisOptions}
+        />
+      </section>
+
+      <section class="bg-white shadow rounded-lg p-4">
+        <h2 class="text-xl font-semibold mb-1">NOx</h2>
+        <p class="text-sm text-gray-500 mb-3">
+          Nitrogen Oxides index (1–500). Relative to the sensor's 24-hour rolling baseline — a value of 1 means (nearly) no NOx detected. Values above 1 indicate elevated oxidising gases; spikes above 20 are typical of cooking on a gas stove or similar sources.
+        </p>
+        <LineChart
+          data={noxChart}
+          label="NOx Index"
+          color="#f97316"
+          yAxisOptions={noxAxisOptions}
+          xAxisOptions={xAxisOptions}
+        />
+      </section>
+
+      <section class="bg-white shadow rounded-lg p-4">
+        <h2 class="text-xl font-semibold mb-2">Formaldehyde (HCHO)</h2>
+        <LineChart
+          data={hchoChart}
+          label="HCHO (ppb)"
+          color="#06b6d4"
+          yAxisOptions={hchoAxisOptions}
+          xAxisOptions={xAxisOptions}
+        />
+      </section>
+
+      <section class="bg-white shadow rounded-lg p-4">
+        <h2 class="text-xl font-semibold mb-2">Dew Point</h2>
+        <LineChart
+          data={dpChart}
+          label="Dew Point (°F)"
+          color="#64748b"
+          yAxisOptions={dpAxisOptions}
           xAxisOptions={xAxisOptions}
         />
       </section>
