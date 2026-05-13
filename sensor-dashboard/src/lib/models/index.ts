@@ -19,6 +19,10 @@ export interface RawSensorData {
   indoorTd: string | number;
 }
 
+export interface LocationData {
+  location: string;
+}
+
 /**
  * Normalized sensor data with consistent types
  */

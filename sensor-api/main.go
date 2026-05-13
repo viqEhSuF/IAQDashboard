@@ -35,6 +35,11 @@ type SensorData struct {
 	Tags     []string  `json:"tags,omitempty"` // Optional tags field
 }
 
+// LocationData represents a distinct sensor location
+type LocationData struct {
+	Location string `json:"location" db:"location"`
+}
+
 // Database configuration - same as in your TypeScript app
 var dbConfig struct {
 	Host     string
@@ -115,23 +120,38 @@ func isInf(val float64, sign int) bool {
 		(sign <= 0 && val < -1.797693134862315708145274237317043567981e+308)
 }
 
+// GetLocations retrieves the distinct sensor locations from the database
+func GetLocations() ([]LocationData, error) {
+	var locations []LocationData
+	err := db.Select(&locations, "SELECT DISTINCT location FROM IAQ_SEN55 ORDER BY location")
+	if err != nil {
+		return nil, err
+	}
+	return locations, nil
+}
+
 // GetSensorData retrieves sensor data from the database with optional filtering
-func GetSensorData(limit int, startDate, endDate string) ([]SensorData, error) {
+func GetSensorData(limit int, startDate, endDate, location string) ([]SensorData, error) {
 	query := "SELECT id, location, recTime, temp, rH, VOC, NOx, pmass1, pmass25, pmass4, pmass10, HCHO, CO2, indoorTd FROM IAQ_SEN55"
 	conditions := []string{}
 	args := []interface{}{}
-	
+
+	if location != "" {
+		conditions = append(conditions, "location = ?")
+		args = append(args, location)
+	}
+
 	// Add date filtering if provided
 	if startDate != "" {
 		conditions = append(conditions, "recTime >= ?")
 		args = append(args, startDate)
 	}
-	
+
 	if endDate != "" {
 		conditions = append(conditions, "recTime <= ?")
 		args = append(args, endDate)
 	}
-	
+
 	// Build the WHERE clause if conditions exist
 	if len(conditions) > 0 {
 		query += " WHERE "
@@ -142,7 +162,7 @@ func GetSensorData(limit int, startDate, endDate string) ([]SensorData, error) {
 			query += condition
 		}
 	}
-	
+
 	// Add sorting and limit
 	query += " ORDER BY recTime DESC LIMIT ?"
 	args = append(args, limit)
@@ -195,13 +215,29 @@ func InsertSensorData(data SensorData) error {
 	return err
 }
 
+// API handler for listing distinct sensor locations
+func handleGetLocations(w http.ResponseWriter, r *http.Request) {
+	locations, err := GetLocations()
+	if err != nil {
+		log.Printf("Error fetching locations: %v", err)
+		http.Error(w, "Failed to fetch locations", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(locations); err != nil {
+		log.Printf("Error encoding locations response: %v", err)
+		http.Error(w, "Error encoding response", http.StatusInternalServerError)
+	}
+}
+
 // API handler for getting sensor data
 func handleGetSensorData(w http.ResponseWriter, r *http.Request) {
 	// Get query parameters
 	startDate := r.URL.Query().Get("startDate")
 	endDate := r.URL.Query().Get("endDate")
+	location := r.URL.Query().Get("location")
 	limitStr := r.URL.Query().Get("limit")
-	
+
 	// Default limit to 15000, as in your TypeScript API
 	limit := 15000
 	if limitStr != "" {
@@ -210,11 +246,11 @@ func handleGetSensorData(w http.ResponseWriter, r *http.Request) {
 			limit = parsedLimit
 		}
 	}
-	
-	log.Printf("Fetching data with range: %s to %s, limit: %d", startDate, endDate, limit)
-	
+
+	log.Printf("Fetching data with range: %s to %s, location: %q, limit: %d", startDate, endDate, location, limit)
+
 	// Get data from database
-	data, err := GetSensorData(limit, startDate, endDate)
+	data, err := GetSensorData(limit, startDate, endDate, location)
 	if err != nil {
 		log.Printf("Error fetching sensor data: %v", err)
 		http.Error(w, "Failed to fetch sensor data", http.StatusInternalServerError)
@@ -287,7 +323,7 @@ func handleGetLatestSensorData(w http.ResponseWriter, r *http.Request) {
 	}
 	
 	// Get latest data from database
-	data, err := GetSensorData(limit, "", "")
+	data, err := GetSensorData(limit, "", "", "")
 	if err != nil {
 		log.Printf("Error fetching latest sensor data: %v", err)
 		http.Error(w, "Failed to fetch latest sensor data", http.StatusInternalServerError)
@@ -315,6 +351,7 @@ func main() {
 	r := mux.NewRouter()
 	
 	// Define API routes
+	r.HandleFunc("/api/locations", handleGetLocations).Methods("GET")
 	r.HandleFunc("/api/sensor-data", handleGetSensorData).Methods("GET")
 	r.HandleFunc("/api/sensor-data", handlePostSensorData).Methods("POST")
 	r.HandleFunc("/api/sensor-data/latest", handleGetLatestSensorData).Methods("GET")

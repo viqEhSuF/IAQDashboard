@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import LineChart from '$lib/Components/LineChart.svelte';
-  import type { NormalizedSensorData } from '$lib/models';
+  import type { NormalizedSensorData, LocationData } from '$lib/models';
   import { getApiUrl } from '$lib/config';
   
   // Define data record type that matches the LineChart component
@@ -19,7 +19,11 @@
   let pmassChart: DataRecord[] = [];
   let loading = true;
   let error: string | null = null;
-  
+
+  // Location filter
+  let availableLocations: LocationData[] = [];
+  let selectedLocation: string | null = null;
+
   // Date range filters
   let startDate: string = '';
   let endDate: string = '';
@@ -124,21 +128,38 @@
   // Hours for selection
   const hours = getHours();
   
-  // Fetch data with the current date range
+  // Fetch available sensor locations
+  async function fetchLocations() {
+    try {
+      const response = await fetch(getApiUrl('locations'));
+      if (response.ok) {
+        availableLocations = await response.json();
+      }
+    } catch (err) {
+      console.error('Error fetching locations:', err);
+    }
+  }
+
+  // Fetch data with the current date range and selected location
   async function fetchData() {
     loading = true;
     error = null;
-    
+
     try {
       // Build URL with date parameters - using the Go API endpoint
       const url = new URL(getApiUrl('sensor-data'));
-      
+
+      // Add location filter if one is selected
+      if (selectedLocation !== null) {
+        url.searchParams.append('location', selectedLocation);
+      }
+
       // Add date parameters with hour precision
       if (startDate) {
         const formattedStartDate = `${startDate}T${startHour.toString().padStart(2, '0')}:00:00`;
         url.searchParams.append('startDate', formattedStartDate);
       }
-      
+
       if (endDate) {
         const formattedEndDate = `${endDate}T${endHour.toString().padStart(2, '0')}:59:59`;
         url.searchParams.append('endDate', formattedEndDate);
@@ -196,12 +217,35 @@
   // Initial load
   onMount(() => {
     setDefaultDateRange();
+    fetchLocations();
     fetchData();
   });
 </script>
 
 <main class="container mx-auto p-4 max-w-4xl">
   <h1 class="text-3xl font-bold mb-6">Sensor Dashboard</h1>
+
+  {#if availableLocations.length > 0}
+    <div class="bg-white shadow rounded-lg p-4 mb-6">
+      <h2 class="text-xl font-semibold mb-3">Sensor Location</h2>
+      <div class="flex flex-wrap gap-2">
+        <button
+          on:click={() => { selectedLocation = null; fetchData(); }}
+          class="px-3 py-1 rounded border {selectedLocation === null ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'}"
+        >
+          All
+        </button>
+        {#each availableLocations as loc}
+          <button
+            on:click={() => { selectedLocation = loc.location; fetchData(); }}
+            class="px-3 py-1 rounded border {selectedLocation === loc.location ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'}"
+          >
+            Location {loc.location}
+          </button>
+        {/each}
+      </div>
+    </div>
+  {/if}
 
   <div class="bg-white shadow rounded-lg p-4 mb-6">
     <h2 class="text-xl font-semibold mb-2">Filter by Date and Time Range</h2>
