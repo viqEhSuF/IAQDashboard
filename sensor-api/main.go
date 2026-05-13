@@ -66,7 +66,7 @@ func initDB() error {
 		log.Printf("Using default port 3306")
 		dbConfig.Port = 3306
 	}
-	dsn := fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?parseTime=true",
+	dsn := fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?parseTime=true&loc=Local",
 		dbConfig.User, dbConfig.Password, dbConfig.Host, dbConfig.Port, dbConfig.Database)
 	
 	var err error
