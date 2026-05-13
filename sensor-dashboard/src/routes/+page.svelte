@@ -245,270 +245,268 @@
   });
 </script>
 
-<main class="container mx-auto p-4 max-w-4xl">
-  <h1 class="text-3xl font-bold mb-6">Sensor Dashboard</h1>
+<main class="min-h-screen bg-slate-50">
 
-  {#if availableLocations.length > 0}
-    <div class="bg-white shadow rounded-lg p-4 mb-6">
-      <h2 class="text-xl font-semibold mb-3">Sensor Location</h2>
-      <div class="flex flex-wrap gap-2">
-        <button
-          on:click={() => { selectedLocation = null; fetchData(); }}
-          class="px-3 py-1 rounded border {selectedLocation === null ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'}"
-        >
-          All
-        </button>
-        {#each availableLocations as loc}
+  <!-- Header -->
+  <header class="bg-gradient-to-r from-slate-800 to-slate-700 shadow-lg">
+    <div class="max-w-6xl mx-auto px-6 py-5 flex items-center justify-between">
+      <div>
+        <h1 class="text-2xl font-bold text-white tracking-tight">IAQ Dashboard</h1>
+        <p class="text-slate-400 text-sm mt-0.5">Indoor Air Quality Monitoring</p>
+      </div>
+      {#if !loading && sensorData.length > 0}
+        <div class="text-right hidden sm:block">
+          <div class="text-white font-semibold">{sensorData.length.toLocaleString()} readings</div>
+          <div class="text-slate-400 text-sm">
+            {new Date(sensorData[sensorData.length - 1].recTime).toLocaleDateString()} – {new Date(sensorData[0].recTime).toLocaleDateString()}
+          </div>
+        </div>
+      {/if}
+    </div>
+  </header>
+
+  <div class="max-w-6xl mx-auto px-4 sm:px-6 py-6 space-y-4">
+
+    <!-- Location selector -->
+    {#if availableLocations.length > 0}
+      <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
+        <h2 class="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Sensor Location</h2>
+        <div class="flex flex-wrap gap-2">
           <button
-            on:click={() => { selectedLocation = loc.location; fetchData(); }}
-            class="px-3 py-1 rounded border {selectedLocation === loc.location ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'}"
+            on:click={() => { selectedLocation = null; fetchData(); }}
+            class="px-4 py-1.5 rounded-full text-sm font-medium transition-colors {selectedLocation === null ? 'bg-slate-700 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}"
           >
-            Location {loc.location}
+            All Locations
           </button>
-        {/each}
-      </div>
-    </div>
-  {/if}
-
-  <div class="bg-white shadow rounded-lg p-4 mb-6">
-    <h2 class="text-xl font-semibold mb-2">Filter by Date and Time Range</h2>
-    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-      <div>
-        <div class="mb-2 font-medium">Start:</div>
-        <div class="flex flex-wrap items-center gap-2">
-          <div class="flex items-center">
-            <label for="start-date" class="mr-2">Date:</label>
-            <input 
-              type="date" 
-              id="start-date" 
-              bind:value={startDate} 
-              on:change={handleDateChange}
-              class="border rounded px-2 py-1"
-            />
-          </div>
-          <div class="flex items-center">
-            <label for="start-hour" class="mr-2">Hour:</label>
-            <select 
-              id="start-hour" 
-              bind:value={startHour} 
-              on:change={handleDateChange}
-              class="border rounded px-2 py-1"
+          {#each availableLocations as loc}
+            <button
+              on:click={() => { selectedLocation = loc.location; fetchData(); }}
+              class="px-4 py-1.5 rounded-full text-sm font-medium transition-colors {selectedLocation === loc.location ? 'bg-slate-700 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}"
             >
-              {#each hours as hour}
-                <option value={hour.value}>{hour.label}</option>
-              {/each}
-            </select>
-          </div>
+              Location {loc.location}
+            </button>
+          {/each}
         </div>
       </div>
-      
-      <div>
-        <div class="mb-2 font-medium">End:</div>
-        <div class="flex flex-wrap items-center gap-2">
-          <div class="flex items-center">
-            <label for="end-date" class="mr-2">Date:</label>
-            <input 
-              type="date" 
-              id="end-date" 
-              bind:value={endDate} 
-              on:change={handleDateChange}
-              class="border rounded px-2 py-1"
-            />
-          </div>
-          <div class="flex items-center">
-            <label for="end-hour" class="mr-2">Hour:</label>
-            <select 
-              id="end-hour" 
-              bind:value={endHour} 
-              on:change={handleDateChange}
-              class="border rounded px-2 py-1"
-            >
-              {#each hours as hour}
-                <option value={hour.value}>{hour.label}</option>
-              {/each}
-            </select>
-          </div>
-        </div>
-      </div>
-    </div>
-    
-    <div class="flex flex-wrap gap-2">
-      <button 
-        on:click={resetDateFilters}
-        class="bg-gray-200 hover:bg-gray-300 text-gray-800 px-3 py-1 rounded"
-      >
-        Reset
-      </button>
-      <button 
-        on:click={() => { setDefaultDateRange(); handleDateChange(); }}
-        class="bg-blue-500 hover:bg-blue-600 text-white px-3 py-1 rounded"
-      >
-        Last 24 Hours
-      </button>
-      <button 
-        on:click={() => { 
-          const now = new Date();
-          endDate = now.toISOString().split('T')[0];
-          endHour = now.getHours();
-          startDate = endDate;
-          startHour = Math.max(0, endHour - 6);
-          handleDateChange(); 
-        }}
-        class="bg-green-500 hover:bg-green-600 text-white px-3 py-1 rounded"
-      >
-        Last 6 Hours
-      </button>
-      <button 
-        on:click={() => { 
-          const now = new Date();
-          endDate = now.toISOString().split('T')[0];
-          endHour = now.getHours();
-          startDate = endDate;
-          startHour = Math.max(0, endHour - 1);
-          handleDateChange(); 
-        }}
-        class="bg-indigo-500 hover:bg-indigo-600 text-white px-3 py-1 rounded"
-      >
-        Last Hour
-      </button>
-    </div>
-    
-    {#if sensorData.length === 0 && !loading}
-      <p class="mt-4 text-amber-600">No data available for the selected date range.</p>
     {/if}
+
+    <!-- Time range filter -->
+    <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
+      <h2 class="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-4">Time Range</h2>
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-6 mb-4">
+        <div>
+          <div class="text-sm font-medium text-gray-600 mb-2">From</div>
+          <div class="flex flex-wrap gap-3">
+            <div class="flex items-center gap-2">
+              <label for="start-date" class="text-sm text-gray-400">Date</label>
+              <input type="date" id="start-date" bind:value={startDate} on:change={handleDateChange}
+                class="border border-gray-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400" />
+            </div>
+            <div class="flex items-center gap-2">
+              <label for="start-hour" class="text-sm text-gray-400">Hour</label>
+              <select id="start-hour" bind:value={startHour} on:change={handleDateChange}
+                class="border border-gray-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400">
+                {#each hours as hour}
+                  <option value={hour.value}>{hour.label}</option>
+                {/each}
+              </select>
+            </div>
+          </div>
+        </div>
+        <div>
+          <div class="text-sm font-medium text-gray-600 mb-2">To</div>
+          <div class="flex flex-wrap gap-3">
+            <div class="flex items-center gap-2">
+              <label for="end-date" class="text-sm text-gray-400">Date</label>
+              <input type="date" id="end-date" bind:value={endDate} on:change={handleDateChange}
+                class="border border-gray-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400" />
+            </div>
+            <div class="flex items-center gap-2">
+              <label for="end-hour" class="text-sm text-gray-400">Hour</label>
+              <select id="end-hour" bind:value={endHour} on:change={handleDateChange}
+                class="border border-gray-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400">
+                {#each hours as hour}
+                  <option value={hour.value}>{hour.label}</option>
+                {/each}
+              </select>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="flex flex-wrap gap-2 pt-3 border-t border-gray-100">
+        <button on:click={resetDateFilters}
+          class="px-3 py-1.5 rounded-lg text-sm font-medium bg-gray-100 text-gray-600 hover:bg-gray-200 transition-colors">
+          Reset
+        </button>
+        <button on:click={() => { setDefaultDateRange(); handleDateChange(); }}
+          class="px-3 py-1.5 rounded-lg text-sm font-medium bg-slate-700 text-white hover:bg-slate-800 transition-colors">
+          Last 24 Hours
+        </button>
+        <button on:click={() => {
+            const now = new Date();
+            endDate = now.toISOString().split('T')[0]; endHour = now.getHours();
+            startDate = endDate; startHour = Math.max(0, endHour - 6);
+            handleDateChange();
+          }}
+          class="px-3 py-1.5 rounded-lg text-sm font-medium bg-slate-600 text-white hover:bg-slate-700 transition-colors">
+          Last 6 Hours
+        </button>
+        <button on:click={() => {
+            const now = new Date();
+            endDate = now.toISOString().split('T')[0]; endHour = now.getHours();
+            startDate = endDate; startHour = Math.max(0, endHour - 1);
+            handleDateChange();
+          }}
+          class="px-3 py-1.5 rounded-lg text-sm font-medium bg-slate-500 text-white hover:bg-slate-600 transition-colors">
+          Last Hour
+        </button>
+      </div>
+    </div>
+
+    <!-- Loading / error / empty states -->
+    {#if loading}
+      <div class="flex flex-col items-center justify-center h-48 bg-white rounded-xl shadow-sm border border-gray-100">
+        <div class="spinner mb-3"></div>
+        <p class="text-gray-400 text-sm">Loading sensor data…</p>
+      </div>
+    {:else if error}
+      <div class="bg-red-50 border border-red-200 text-red-700 p-5 rounded-xl">
+        <p class="font-semibold mb-1">Connection error</p>
+        <p class="text-sm">{error}</p>
+      </div>
+    {:else if sensorData.length === 0}
+      <div class="bg-amber-50 border border-amber-200 text-amber-700 p-5 rounded-xl">
+        <p class="font-semibold">No data</p>
+        <p class="text-sm mt-1">No readings found for the selected filters.</p>
+      </div>
+    {:else}
+
+      <!-- Summary bar -->
+      <p class="text-sm text-gray-400 px-1">
+        Showing <span class="font-medium text-gray-600">{sensorData.length.toLocaleString()}</span> readings
+        · <span class="font-medium text-gray-600">{new Date(sensorData[sensorData.length - 1].recTime).toLocaleString()}</span>
+        → <span class="font-medium text-gray-600">{new Date(sensorData[0].recTime).toLocaleString()}</span>
+      </p>
+
+      <!-- Chart cards -->
+      <div class="space-y-4">
+
+        <section class="chart-card" style="border-left-color: #ef4444">
+          <div class="card-header">
+            <h2 class="card-title">Temperature</h2>
+          </div>
+          <LineChart data={tempChart} label="Temperature (°F)" color="#ef4444"
+            yAxisOptions={tempAxisOptions} xAxisOptions={xAxisOptions} />
+        </section>
+
+        <section class="chart-card" style="border-left-color: #10b981">
+          <div class="card-header">
+            <h2 class="card-title">CO₂</h2>
+          </div>
+          <LineChart data={co2Chart} label="CO2 (ppm)" color="#10b981"
+            yAxisOptions={co2AxisOptions} xAxisOptions={xAxisOptions} />
+        </section>
+
+        <section class="chart-card" style="border-left-color: #3b82f6">
+          <div class="card-header">
+            <h2 class="card-title">Humidity</h2>
+          </div>
+          <LineChart data={humidityChart} label="Humidity (%)" color="#3b82f6"
+            xAxisOptions={xAxisOptions} />
+        </section>
+
+        <section class="chart-card" style="border-left-color: #8b5cf6">
+          <div class="card-header">
+            <h2 class="card-title">VOC</h2>
+            <p class="card-note">Volatile Organic Compound index (0–500). Normalised around 100 on a rolling basis — above 100 indicates higher VOC than the recent baseline, below 100 indicates cleaner air.</p>
+          </div>
+          <LineChart data={vocChart} label="VOC Index" color="#8b5cf6"
+            yAxisOptions={vocAxisOptions} xAxisOptions={xAxisOptions} />
+        </section>
+
+        <section class="chart-card" style="border-left-color: #f59e0b">
+          <div class="card-header">
+            <h2 class="card-title">Particulate Matter (PM2.5)</h2>
+          </div>
+          <LineChart data={pmassChart} label="PM2.5 (μg/m³)" color="#f59e0b"
+            yAxisOptions={pmAxisOptions} xAxisOptions={xAxisOptions} />
+        </section>
+
+        <section class="chart-card" style="border-left-color: #f97316">
+          <div class="card-header">
+            <h2 class="card-title">NOx</h2>
+            <p class="card-note">Nitrogen Oxides index (1–500). Relative to the sensor's 24-hour rolling baseline — a value of 1 means (nearly) no NOx detected. Values above 1 indicate elevated oxidising gases; spikes above 20 are typical of gas cooking or similar sources.</p>
+          </div>
+          <LineChart data={noxChart} label="NOx Index" color="#f97316"
+            yAxisOptions={noxAxisOptions} xAxisOptions={xAxisOptions} />
+        </section>
+
+        <section class="chart-card" style="border-left-color: #06b6d4">
+          <div class="card-header">
+            <h2 class="card-title">Formaldehyde (HCHO)</h2>
+          </div>
+          <LineChart data={hchoChart} label="HCHO (ppb)" color="#06b6d4"
+            yAxisOptions={hchoAxisOptions} xAxisOptions={xAxisOptions} />
+        </section>
+
+        <section class="chart-card" style="border-left-color: #64748b">
+          <div class="card-header">
+            <h2 class="card-title">Dew Point</h2>
+          </div>
+          <LineChart data={dpChart} label="Dew Point (°F)" color="#64748b"
+            yAxisOptions={dpAxisOptions} xAxisOptions={xAxisOptions} />
+        </section>
+
+      </div>
+    {/if}
+
   </div>
-
-  {#if loading}
-    <div class="flex justify-center items-center h-40 bg-white shadow rounded-lg">
-      <div class="animate-pulse text-lg">Loading data...</div>
-    </div>
-  {:else if error}
-    <div class="bg-red-50 border border-red-200 text-red-700 p-4 rounded mb-6">
-      <p><strong>Error:</strong> {error}</p>
-    </div>
-  {:else if sensorData.length === 0}
-    <div class="bg-amber-50 border border-amber-200 text-amber-700 p-4 rounded mb-6">
-      <p>No data available for the selected date range.</p>
-    </div>
-  {:else}
-    <div class="mb-4 text-sm text-gray-600">
-      Showing {sensorData.length} data points from {sensorData.length > 0 ? new Date(sensorData[sensorData.length - 1].recTime).toLocaleString() : ''} to {sensorData.length > 0 ? new Date(sensorData[0].recTime).toLocaleString() : ''}
-    </div>
-    
-    <div class="space-y-6">
-      <section class="bg-white shadow rounded-lg p-4">
-        <h2 class="text-xl font-semibold mb-2">Temperature</h2>
-        <LineChart 
-          data={tempChart} 
-          label="Temperature (°F)" 
-          color="#ef4444"
-          yAxisOptions={tempAxisOptions}
-          xAxisOptions={xAxisOptions}
-        />
-      </section>
-      
-      <section class="bg-white shadow rounded-lg p-4">
-        <h2 class="text-xl font-semibold mb-2">CO2</h2>
-        <LineChart 
-          data={co2Chart} 
-          label="CO2 (ppm)" 
-          color="#10b981"
-          yAxisOptions={co2AxisOptions}
-          xAxisOptions={xAxisOptions}
-        />
-      </section>
-      
-      <section class="bg-white shadow rounded-lg p-4">
-        <h2 class="text-xl font-semibold mb-2">Humidity</h2>
-        <LineChart 
-          data={humidityChart} 
-          label="Humidity (%)" 
-          color="#3b82f6"
-          xAxisOptions={xAxisOptions}
-        />
-      </section>
-      
-      <section class="bg-white shadow rounded-lg p-4">
-        <h2 class="text-xl font-semibold mb-1">VOC</h2>
-        <p class="text-sm text-gray-500 mb-3">
-          Volatile Organic Compound index (0–500). Normalised around 100 on a rolling basis — values above 100 indicate higher VOC levels than the recent baseline, values below 100 indicate cleaner air.
-        </p>
-        <LineChart
-          data={vocChart}
-          label="VOC Index"
-          color="#8b5cf6"
-          yAxisOptions={vocAxisOptions}
-          xAxisOptions={xAxisOptions}
-        />
-      </section>
-      
-      <section class="bg-white shadow rounded-lg p-4">
-        <h2 class="text-xl font-semibold mb-2">Particulate Matter</h2>
-        <LineChart
-          data={pmassChart}
-          label="PM2.5 (μg/m³)"
-          color="#f59e0b"
-          yAxisOptions={pmAxisOptions}
-          xAxisOptions={xAxisOptions}
-        />
-      </section>
-
-      <section class="bg-white shadow rounded-lg p-4">
-        <h2 class="text-xl font-semibold mb-1">NOx</h2>
-        <p class="text-sm text-gray-500 mb-3">
-          Nitrogen Oxides index (1–500). Relative to the sensor's 24-hour rolling baseline — a value of 1 means (nearly) no NOx detected. Values above 1 indicate elevated oxidising gases; spikes above 20 are typical of cooking on a gas stove or similar sources.
-        </p>
-        <LineChart
-          data={noxChart}
-          label="NOx Index"
-          color="#f97316"
-          yAxisOptions={noxAxisOptions}
-          xAxisOptions={xAxisOptions}
-        />
-      </section>
-
-      <section class="bg-white shadow rounded-lg p-4">
-        <h2 class="text-xl font-semibold mb-2">Formaldehyde (HCHO)</h2>
-        <LineChart
-          data={hchoChart}
-          label="HCHO (ppb)"
-          color="#06b6d4"
-          yAxisOptions={hchoAxisOptions}
-          xAxisOptions={xAxisOptions}
-        />
-      </section>
-
-      <section class="bg-white shadow rounded-lg p-4">
-        <h2 class="text-xl font-semibold mb-2">Dew Point</h2>
-        <LineChart
-          data={dpChart}
-          label="Dew Point (°F)"
-          color="#64748b"
-          yAxisOptions={dpAxisOptions}
-          xAxisOptions={xAxisOptions}
-        />
-      </section>
-    </div>
-  {/if}
 </main>
 
 <style>
   :global(body) {
-    background-color: #f9fafb;
+    background-color: #f8fafc;
     color: #111827;
   }
-  
-  .animate-pulse {
-    animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+
+  .chart-card {
+    background: white;
+    border-radius: 0.75rem;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
+    border: 1px solid #f1f5f9;
+    border-left: 4px solid #cbd5e1;
+    overflow: hidden;
+    padding: 1.25rem 1.25rem 0.75rem;
   }
-  
-  @keyframes pulse {
-    0%, 100% {
-      opacity: 1;
-    }
-    50% {
-      opacity: 0.5;
-    }
+
+  .card-header {
+    margin-bottom: 0.5rem;
+  }
+
+  .card-title {
+    font-size: 0.9375rem;
+    font-weight: 600;
+    color: #374151;
+  }
+
+  .card-note {
+    font-size: 0.75rem;
+    color: #9ca3af;
+    margin-top: 0.25rem;
+    line-height: 1.5;
+  }
+
+  .spinner {
+    width: 2rem;
+    height: 2rem;
+    border: 3px solid #e2e8f0;
+    border-top-color: #475569;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+
+  @keyframes spin {
+    to { transform: rotate(360deg); }
   }
 </style>
 
