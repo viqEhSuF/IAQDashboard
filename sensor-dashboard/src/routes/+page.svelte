@@ -90,7 +90,7 @@
   };
   
   $: vocAxisOptions = {
-    minValue: 0,
+    minValue: 1,
     maxValue: 500,
   };
   
@@ -418,7 +418,7 @@
         <section class="chart-card" style="border-left-color: #8b5cf6">
           <div class="card-header">
             <h2 class="card-title">VOC</h2>
-            <p class="card-note">Volatile Organic Compound index (0–500). Normalised around 100 on a rolling basis — above 100 indicates higher VOC than the recent baseline, below 100 indicates cleaner air.</p>
+            <p class="card-note">Volatile Organic Compound index (1–500). Relative to the sensor's 24-hour rolling baseline — a value of 100 represents the average VOC level. Values above 100 indicate more VOCs than the recent average (e.g., cooking, cleaning); values below 100 indicate fewer VOCs (e.g., fresh air from an open window or air purifier).</p>
           </div>
           <LineChart data={vocChart} label="VOC Index" color="#8b5cf6"
             yAxisOptions={vocAxisOptions} xAxisOptions={xAxisOptions} />

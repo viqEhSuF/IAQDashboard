@@ -70,11 +70,11 @@
     } else if (label.includes('VOC')) {
       yAxisOptions = {
         ...{
-          minValue: 0,
-          maxValue: undefined,
+          minValue: 1,
+          maxValue: 500,
           numTicks: 5,
           gridLine: true,
-          tickFormat: (d) => `${d} ppb`
+          tickFormat: (d) => `${d}`
         },
         ...yAxisOptions
       };
