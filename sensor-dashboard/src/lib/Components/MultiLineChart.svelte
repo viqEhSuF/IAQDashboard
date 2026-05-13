@@ -12,31 +12,48 @@
   export let series: SeriesConfig[] = [];
   export let height: number = 380;
 
-  const x = (d: DataRecord) => d.x;
-  const y = (d: DataRecord) => d.y;
-
   $: activeSeries = series.filter(s => s.data.length > 0);
 
-  // Container uses the densest series for the x-scale and crosshair snapping
-  $: containerData = activeSeries.reduce(
-    (best, s) => s.data.length > best.data.length ? s : best,
-    activeSeries[0] ?? { data: [], color: '', label: '' }
-  ).data;
+  // Build joined data: one record per unique x, with y0/y1/... fields per series.
+  // NaN where a series has no reading at that timestamp — VisLine renders NaN as a gap,
+  // keeping each line continuous within its own data.
+  type JoinedRecord = Record<string, number>;
 
-  // Crosshair tooltip: nearest-neighbour lookup into every series at the hovered x
-  $: crosshairTemplate = (d: DataRecord) => {
+  $: joinedData = (() => {
+    if (activeSeries.length === 0) return [] as JoinedRecord[];
+    const xSet = new Set<number>();
+    for (const s of activeSeries) for (const pt of s.data) xSet.add(pt.x);
+    const allX = Array.from(xSet).sort((a, b) => a - b);
+    const maps = activeSeries.map(s => {
+      const m = new Map<number, number>();
+      for (const pt of s.data) m.set(pt.x, pt.y);
+      return m;
+    });
+    return allX.map(xVal => {
+      const rec: JoinedRecord = { x: xVal };
+      maps.forEach((m, i) => { rec[`y${i}`] = m.get(xVal) ?? NaN; });
+      return rec;
+    });
+  })();
+
+  // Single VisLine with arrays of accessors + colors — the correct Unovis multi-line pattern.
+  $: xAccessor = (d: JoinedRecord) => d.x;
+  $: yAccessors = activeSeries.map((_, i) => (d: JoinedRecord) => d[`y${i}`]);
+  $: colors = activeSeries.map(s => s.color);
+
+  // Crosshair snaps to the densest series (index 0 after sort); tooltip shows all via lookup.
+  $: crosshairY = yAccessors[0] ?? ((d: JoinedRecord) => d.y0);
+
+  $: crosshairTemplate = (d: JoinedRecord) => {
     const time = new Date(d.x).toLocaleString(undefined, {
       month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
     });
-    const rows = activeSeries.map(s => {
-      const nearest = s.data.reduce((best, cur) =>
-        Math.abs(cur.x - d.x) < Math.abs(best.x - d.x) ? cur : best,
-        s.data[0]
-      );
-      if (!nearest) return '';
+    const rows = activeSeries.map((s, i) => {
+      const val = d[`y${i}`];
+      if (isNaN(val) || val === undefined) return '';
       return `<div style="display:flex;align-items:center;gap:6px;margin-top:3px">
         <span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${s.color};flex-shrink:0"></span>
-        <span style="font-size:0.8125rem;color:#374151">${s.label}: <strong>${nearest.y.toFixed(2)}</strong></span>
+        <span style="font-size:0.8125rem;color:#374151">${s.label}: <strong>${val.toFixed(2)}</strong></span>
       </div>`;
     }).join('');
     return `<div style="padding:8px 10px;font-family:sans-serif;min-width:180px">
@@ -53,21 +70,18 @@
   {#if activeSeries.length === 0}
     <div class="empty">No data to display</div>
   {:else}
-    <VisXYContainer data={containerData} {height}>
-      {#each activeSeries as s}
-        <VisLine
-          data={s.data}
-          {x}
-          {y}
-          curveType="monotoneX"
-          lineWidth={2}
-          color={s.color}
-          highlightOnHover={true}
-        />
-      {/each}
+    <VisXYContainer data={joinedData} {height}>
+      <VisLine
+        x={xAccessor}
+        y={yAccessors}
+        color={colors}
+        curveType="monotoneX"
+        lineWidth={2}
+        highlightOnHover={true}
+      />
       <VisAxis type="x" position="bottom" label="Time" numTicks={6} gridLine={true} tickFormat={xTickFormat} />
       <VisAxis type="y" position="left" numTicks={5} gridLine={true} />
-      <VisCrosshair {x} {y} color={activeSeries[0]?.color ?? '#1d4ed8'} template={crosshairTemplate} />
+      <VisCrosshair x={xAccessor} y={crosshairY} color={activeSeries[0]?.color ?? '#1d4ed8'} template={crosshairTemplate} />
       <VisTooltip />
     </VisXYContainer>
 
