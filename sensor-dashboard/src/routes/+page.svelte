@@ -378,16 +378,16 @@
     }
   }
 
-  // Initial load — fetch names and locations in parallel, then data.
+  // Initial load
   onMount(async () => {
     setDefaultDateRange();
-    await Promise.all([
-      fetch(getApiUrl('location-names'))
-        .then(r => r.ok ? r.json() : {})
-        .then(names => { locationNames = names ?? {}; })
-        .catch(() => {}),
-      fetchLocations()
-    ]);
+    // Names are cosmetic — fetch in background, never block page load.
+    fetch(getApiUrl('location-names'))
+      .then(r => r.ok ? r.json() : {})
+      .then(names => { locationNames = names ?? {}; })
+      .catch(() => {});
+    // Locations must finish before data so multi-line mode works on first load.
+    await fetchLocations();
     fetchData();
   });
 </script>
