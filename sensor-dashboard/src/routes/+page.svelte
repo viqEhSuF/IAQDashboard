@@ -208,10 +208,12 @@
   }
   
   function createTimeSeriesData(data: NormalizedSensorData[], field: keyof NormalizedSensorData): DataRecord[] {
-    return data.map(d => ({
-      x: new Date(d.recTime).getTime(),
-      y: Number(d[field])
-    }));
+    return data
+      .map(d => ({
+        x: new Date(d.recTime).getTime(),
+        y: Number(d[field])
+      }))
+      .sort((a, b) => a.x - b.x);
   }
   
   // Initial load

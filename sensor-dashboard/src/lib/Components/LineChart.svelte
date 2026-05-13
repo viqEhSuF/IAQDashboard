@@ -1,6 +1,6 @@
 <script lang="ts">
   import { VisXYContainer, VisLine, VisAxis, VisTooltip, VisCrosshair } from '@unovis/svelte';
-  import { Line, Crosshair } from '@unovis/ts';
+  import { Line } from '@unovis/ts';
   
   // Define the data type expected
   type DataRecord = {
@@ -125,15 +125,13 @@
     return v;
   }
 
-  // Crosshair tooltip — triggered when the crosshair circle is hovered
-  $: tooltipTriggers = {
-    [Crosshair.selectors.circle]: (d: DataRecord) => `
-      <div style="padding:8px;font-family:sans-serif;min-width:160px;">
-        <div style="font-weight:600;margin-bottom:4px;">${new Date(d.x).toLocaleString()}</div>
-        <div>${label}: <strong>${formatValue(d.y)}</strong></div>
-      </div>
-    `
-  };
+  // Crosshair tooltip template — called with the snapped data point
+  $: crosshairTemplate = (d: DataRecord) => `
+    <div style="padding:8px;font-family:sans-serif;min-width:160px;">
+      <div style="font-weight:600;margin-bottom:4px;">${new Date(d.x).toLocaleString()}</div>
+      <div>${label}: <strong>${formatValue(d.y)}</strong></div>
+    </div>
+  `;
 </script>
 
 <div class="chart-container">
@@ -185,8 +183,8 @@
           tickTextColor={yAxisOptions.tickTextColor}
           tickTextFontSize={yAxisOptions.tickTextFontSize}
         />
-        <VisCrosshair {x} {y} color={color} />
-        <VisTooltip triggers={tooltipTriggers} />
+        <VisCrosshair {x} {y} color={color} template={crosshairTemplate} />
+        <VisTooltip />
       </VisXYContainer>
     {/if}
   </div>
