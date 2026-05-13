@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import LineChart from '$lib/Components/LineChart.svelte';
+  import MultiLineChart from '$lib/Components/MultiLineChart.svelte';
   import type { NormalizedSensorData, LocationData } from '$lib/models';
   import { getApiUrl } from '$lib/config';
   
@@ -237,6 +238,87 @@
       .sort((a, b) => a.x - b.x);
   }
   
+  // ── Overlay chart ───────────────────────────────────────────────────────
+
+  const OVERLAY_COLORS = [
+    '#ef4444', '#3b82f6', '#10b981', '#f59e0b',
+    '#8b5cf6', '#f97316', '#06b6d4', '#ec4899',
+    '#84cc16', '#14b8a6', '#a78bfa', '#fb923c'
+  ];
+
+  const OVERLAY_METRICS: { label: string; field: keyof NormalizedSensorData }[] = [
+    { label: 'Temperature', field: 'temp'     },
+    { label: 'CO₂',         field: 'CO2'      },
+    { label: 'Humidity',    field: 'rH'       },
+    { label: 'VOC Index',   field: 'VOC'      },
+    { label: 'PM2.5',       field: 'pmass25'  },
+    { label: 'NOx Index',   field: 'NOx'      },
+    { label: 'HCHO',        field: 'HCHO'     },
+    { label: 'Dew Point',   field: 'indoorTd' },
+  ];
+
+  let overlayLocations: string[] = [];
+  let overlayMetrics: (keyof NormalizedSensorData)[] = [];
+  let overlaySeries: { data: { x: number; y: number }[]; color: string; label: string }[] = [];
+  let overlayLoading = false;
+  let overlayError: string | null = null;
+
+  function toggleOverlayLocation(loc: string) {
+    overlayLocations = overlayLocations.includes(loc)
+      ? overlayLocations.filter(l => l !== loc)
+      : [...overlayLocations, loc];
+  }
+
+  function toggleOverlayMetric(field: keyof NormalizedSensorData) {
+    overlayMetrics = overlayMetrics.includes(field)
+      ? overlayMetrics.filter(f => f !== field)
+      : [...overlayMetrics, field];
+  }
+
+  function overlayLabel(loc: string, metricLabel: string): string {
+    if (overlayLocations.length > 1 && overlayMetrics.length > 1) return `Loc ${loc} · ${metricLabel}`;
+    if (overlayLocations.length > 1) return `Location ${loc}`;
+    return metricLabel;
+  }
+
+  async function generateOverlay() {
+    if (overlayLocations.length === 0 || overlayMetrics.length === 0) return;
+    overlayLoading = true;
+    overlayError = null;
+    overlaySeries = [];
+    try {
+      const results = await Promise.all(
+        overlayLocations.map(async loc => {
+          const url = new URL(getApiUrl('sensor-data'), window.location.origin);
+          url.searchParams.append('location', loc);
+          if (startDate) url.searchParams.append('startDate', `${startDate}T${startHour.toString().padStart(2, '0')}:00:00`);
+          if (endDate)   url.searchParams.append('endDate',   `${endDate}T${endHour.toString().padStart(2, '0')}:59:59`);
+          const res = await fetch(url);
+          if (!res.ok) throw new Error(`HTTP ${res.status} for location ${loc}`);
+          return { loc, data: await res.json() as NormalizedSensorData[] };
+        })
+      );
+      let colorIdx = 0;
+      const built: typeof overlaySeries = [];
+      for (const { loc, data } of results) {
+        for (const field of overlayMetrics) {
+          const metricDef = OVERLAY_METRICS.find(m => m.field === field)!;
+          built.push({
+            data: createTimeSeriesData(data, field),
+            color: OVERLAY_COLORS[colorIdx % OVERLAY_COLORS.length],
+            label: overlayLabel(loc, metricDef.label)
+          });
+          colorIdx++;
+        }
+      }
+      overlaySeries = built;
+    } catch (err) {
+      overlayError = err instanceof Error ? err.message : 'Unknown error';
+    } finally {
+      overlayLoading = false;
+    }
+  }
+
   // Initial load
   onMount(() => {
     setDefaultDateRange();
@@ -457,6 +539,80 @@
             yAxisOptions={dpAxisOptions} xAxisOptions={xAxisOptions} />
         </section>
 
+      </div>
+    {/if}
+
+    <!-- ── Custom Overlay Chart ─────────────────────────────────────────── -->
+    {#if availableLocations.length > 0}
+      <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
+        <h2 class="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">Custom Overlay Chart</h2>
+        <p class="text-xs text-gray-400 mb-5">Combine any locations and metrics on one chart. Works best when selected metrics share similar value ranges.</p>
+
+        <div class="mb-4">
+          <div class="text-sm font-medium text-gray-600 mb-2">Locations</div>
+          <div class="flex flex-wrap gap-2">
+            {#each availableLocations as loc}
+              <button
+                on:click={() => toggleOverlayLocation(loc.location)}
+                class="px-4 py-1.5 rounded-full text-sm font-medium transition-colors {overlayLocations.includes(loc.location) ? 'bg-slate-700 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}"
+              >
+                Location {loc.location}
+              </button>
+            {/each}
+          </div>
+        </div>
+
+        <div class="mb-5">
+          <div class="text-sm font-medium text-gray-600 mb-2">Metrics</div>
+          <div class="flex flex-wrap gap-2">
+            {#each OVERLAY_METRICS as m}
+              <button
+                on:click={() => toggleOverlayMetric(m.field)}
+                class="px-4 py-1.5 rounded-full text-sm font-medium transition-colors {overlayMetrics.includes(m.field) ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}"
+              >
+                {m.label}
+              </button>
+            {/each}
+          </div>
+        </div>
+
+        <div class="flex items-center gap-3 pb-5 border-b border-gray-100">
+          <button
+            on:click={generateOverlay}
+            disabled={overlayLocations.length === 0 || overlayMetrics.length === 0 || overlayLoading}
+            class="px-5 py-2 rounded-lg text-sm font-semibold bg-slate-700 text-white hover:bg-slate-800 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            {overlayLoading ? 'Loading…' : 'Generate Chart'}
+          </button>
+          <span class="text-xs text-gray-400">
+            {#if overlayLocations.length === 0 || overlayMetrics.length === 0}
+              Select at least one location and one metric
+            {:else}
+              {overlayLocations.length} location{overlayLocations.length > 1 ? 's' : ''}
+              · {overlayMetrics.length} metric{overlayMetrics.length > 1 ? 's' : ''}
+              · {overlayLocations.length * overlayMetrics.length} series
+            {/if}
+          </span>
+        </div>
+
+        <div class="mt-5">
+          {#if overlayLoading}
+            <div class="flex flex-col items-center justify-center h-48">
+              <div class="spinner mb-3"></div>
+              <p class="text-gray-400 text-sm">Fetching overlay data…</p>
+            </div>
+          {:else if overlayError}
+            <div class="bg-red-50 border border-red-200 text-red-700 p-4 rounded-lg text-sm">
+              <span class="font-semibold">Error:</span> {overlayError}
+            </div>
+          {:else if overlaySeries.length > 0}
+            <MultiLineChart series={overlaySeries} height={380} />
+          {:else}
+            <div class="flex items-center justify-center h-32 bg-gray-50 rounded-lg border border-dashed border-gray-200">
+              <p class="text-gray-400 text-sm">Your overlay chart will appear here</p>
+            </div>
+          {/if}
+        </div>
       </div>
     {/if}
 
