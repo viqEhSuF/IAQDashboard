@@ -378,14 +378,16 @@
     }
   }
 
-  // Initial load
+  // Initial load — fetch names and locations in parallel, then data.
   onMount(async () => {
-    try {
-      const res = await fetch(getApiUrl('location-names'));
-      if (res.ok) locationNames = (await res.json()) ?? {};
-    } catch { /* non-fatal — names fall back to "Location N" */ }
     setDefaultDateRange();
-    fetchLocations();
+    await Promise.all([
+      fetch(getApiUrl('location-names'))
+        .then(r => r.ok ? r.json() : {})
+        .then(names => { locationNames = names ?? {}; })
+        .catch(() => {}),
+      fetchLocations()
+    ]);
     fetchData();
   });
 </script>
