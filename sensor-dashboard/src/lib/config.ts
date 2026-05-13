@@ -5,7 +5,7 @@
 
 // The base URL for the Go API
 // Change this to match your Go API server address
-export const API_BASE_URL = 'http://localhost:8080';
+export const API_BASE_URL = '';
 
 // Function to get a full API URL for a given endpoint
 export function getApiUrl(endpoint: string): string {

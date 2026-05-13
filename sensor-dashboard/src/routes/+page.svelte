@@ -147,7 +147,7 @@
 
     try {
       // Build URL with date parameters - using the Go API endpoint
-      const url = new URL(getApiUrl('sensor-data'));
+      const url = new URL(getApiUrl('sensor-data'), window.location.origin);
 
       // Add location filter if one is selected
       if (selectedLocation !== null) {
