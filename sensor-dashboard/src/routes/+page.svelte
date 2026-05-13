@@ -28,6 +28,39 @@
   let availableLocations: LocationData[] = [];
   let selectedLocation: string | null = null;
 
+  // Persistent custom names — stored in localStorage as { "1": "Living Room", ... }
+  let locationNames: Record<string, string> = {};
+  let editingLocation: string | null = null;
+  let editingValue = '';
+
+  function locationLabel(loc: string): string {
+    return locationNames[loc]?.trim() || `Location ${loc}`;
+  }
+
+  function startEdit(loc: string) {
+    editingLocation = loc;
+    editingValue = locationNames[loc] ?? '';
+  }
+
+  function saveEdit() {
+    if (editingLocation === null) return;
+    const trimmed = editingValue.trim();
+    if (trimmed) {
+      locationNames[editingLocation] = trimmed;
+    } else {
+      delete locationNames[editingLocation];
+    }
+    locationNames = { ...locationNames };
+    localStorage.setItem('iaq-location-names', JSON.stringify(locationNames));
+    editingLocation = null;
+  }
+
+  // Svelte action: focus an input as soon as it mounts.
+  function focusOnMount(node: HTMLInputElement) {
+    node.focus();
+    node.select();
+  }
+
   // Date range filters
   let startDate: string = '';
   let endDate: string = '';
@@ -276,8 +309,9 @@
   }
 
   function overlayLabel(loc: string, metricLabel: string): string {
-    if (overlayLocations.length > 1 && overlayMetrics.length > 1) return `Loc ${loc} · ${metricLabel}`;
-    if (overlayLocations.length > 1) return `Location ${loc}`;
+    const name = locationLabel(loc);
+    if (overlayLocations.length > 1 && overlayMetrics.length > 1) return `${name} · ${metricLabel}`;
+    if (overlayLocations.length > 1) return name;
     return metricLabel;
   }
 
@@ -321,6 +355,10 @@
 
   // Initial load
   onMount(() => {
+    try {
+      const saved = localStorage.getItem('iaq-location-names');
+      if (saved) locationNames = JSON.parse(saved);
+    } catch { /* ignore corrupt storage */ }
     setDefaultDateRange();
     fetchLocations();
     fetchData();
@@ -361,12 +399,36 @@
             All Locations
           </button>
           {#each availableLocations as loc}
-            <button
-              on:click={() => { selectedLocation = loc.location; fetchData(); }}
-              class="px-4 py-1.5 rounded-full text-sm font-medium transition-colors {selectedLocation === loc.location ? 'bg-slate-700 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}"
-            >
-              Location {loc.location}
-            </button>
+            {#if editingLocation === loc.location}
+              <div class="flex items-center gap-1">
+                <input
+                  use:focusOnMount
+                  bind:value={editingValue}
+                  placeholder="Location {loc.location}"
+                  on:keydown={e => { if (e.key === 'Enter') saveEdit(); if (e.key === 'Escape') editingLocation = null; }}
+                  on:blur={saveEdit}
+                  class="px-3 py-1 rounded-full text-sm border border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-500 w-36"
+                />
+              </div>
+            {:else}
+              <div class="group flex items-center gap-0.5">
+                <button
+                  on:click={() => { selectedLocation = loc.location; fetchData(); }}
+                  class="px-4 py-1.5 rounded-full text-sm font-medium transition-colors {selectedLocation === loc.location ? 'bg-slate-700 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}"
+                >
+                  {locationLabel(loc.location)}
+                </button>
+                <button
+                  on:click|stopPropagation={() => startEdit(loc.location)}
+                  title="Rename"
+                  class="opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded-full text-gray-400 hover:text-gray-600 hover:bg-gray-100"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
+                    <path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" />
+                  </svg>
+                </button>
+              </div>
+            {/if}
           {/each}
         </div>
       </div>
@@ -556,7 +618,7 @@
                 on:click={() => toggleOverlayLocation(loc.location)}
                 class="px-4 py-1.5 rounded-full text-sm font-medium transition-colors {overlayLocations.includes(loc.location) ? 'bg-slate-700 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}"
               >
-                Location {loc.location}
+                {locationLabel(loc.location)}
               </button>
             {/each}
           </div>
