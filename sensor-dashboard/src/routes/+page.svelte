@@ -88,7 +88,7 @@
   
   $: vocAxisOptions = {
     minValue: 0,
-    maxValue: vocChart.length ? Math.max(...vocChart.map(d => d.y).filter(v => !isNaN(v))) * 1.2 : 1000,
+    maxValue: 500,
   };
   
   $: pmAxisOptions = {
@@ -406,10 +406,13 @@
       </section>
       
       <section class="bg-white shadow rounded-lg p-4">
-        <h2 class="text-xl font-semibold mb-2">VOC</h2>
-        <LineChart 
-          data={vocChart} 
-          label="VOC (ppb)" 
+        <h2 class="text-xl font-semibold mb-1">VOC</h2>
+        <p class="text-sm text-gray-500 mb-3">
+          Volatile Organic Compound index (0–500). Normalised around 100 on a rolling basis — values above 100 indicate higher VOC levels than the recent baseline, values below 100 indicate cleaner air.
+        </p>
+        <LineChart
+          data={vocChart}
+          label="VOC Index"
           color="#8b5cf6"
           yAxisOptions={vocAxisOptions}
           xAxisOptions={xAxisOptions}
