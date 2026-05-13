@@ -490,8 +490,28 @@
           class="px-3 py-1.5 rounded-lg text-sm font-medium bg-gray-100 text-gray-600 hover:bg-gray-200 transition-colors">
           Reset
         </button>
-        <button on:click={() => { setDefaultDateRange(); handleDateChange(); }}
+        <button on:click={() => {
+            const now = new Date();
+            const then = new Date(now); then.setDate(now.getDate() - 30);
+            endDate = now.toISOString().split('T')[0]; endHour = now.getHours();
+            startDate = then.toISOString().split('T')[0]; startHour = now.getHours();
+            handleDateChange();
+          }}
           class="px-3 py-1.5 rounded-lg text-sm font-medium bg-slate-700 text-white hover:bg-slate-800 transition-colors">
+          Last Month
+        </button>
+        <button on:click={() => {
+            const now = new Date();
+            const then = new Date(now); then.setDate(now.getDate() - 7);
+            endDate = now.toISOString().split('T')[0]; endHour = now.getHours();
+            startDate = then.toISOString().split('T')[0]; startHour = now.getHours();
+            handleDateChange();
+          }}
+          class="px-3 py-1.5 rounded-lg text-sm font-medium bg-slate-700 text-white hover:bg-slate-800 transition-colors">
+          Last Week
+        </button>
+        <button on:click={() => { setDefaultDateRange(); handleDateChange(); }}
+          class="px-3 py-1.5 rounded-lg text-sm font-medium bg-slate-600 text-white hover:bg-slate-700 transition-colors">
           Last 24 Hours
         </button>
         <button on:click={() => {
