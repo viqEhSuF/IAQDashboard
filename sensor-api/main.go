@@ -432,7 +432,7 @@ func main() {
 	defer db.Close()
 
 	if err := initLocationNamesTable(); err != nil {
-		log.Fatalf("Failed to create location_names table: %v", err)
+		log.Printf("Warning: could not create location_names table: %v — location renaming will be unavailable", err)
 	}
 
 	// Create router

@@ -27,27 +27,6 @@
   // Location filter
   let availableLocations: LocationData[] = [];
   let selectedLocation: string | null = null;
-  let allLocationData: { loc: string; data: NormalizedSensorData[] }[] = [];
-
-  // True when showing all locations — switches each chart to MultiLineChart.
-  $: showMultiLine = selectedLocation === null && allLocationData.length > 1;
-
-  function buildSeries(field: keyof NormalizedSensorData) {
-    return allLocationData.map(({ loc, data }, i) => ({
-      data: createTimeSeriesData(data, field),
-      color: OVERLAY_COLORS[i % OVERLAY_COLORS.length],
-      label: locationLabel(loc),
-    }));
-  }
-
-  $: tempSeries     = showMultiLine ? buildSeries('temp')     : [];
-  $: co2Series      = showMultiLine ? buildSeries('CO2')      : [];
-  $: humiditySeries = showMultiLine ? buildSeries('rH')       : [];
-  $: vocSeries      = showMultiLine ? buildSeries('VOC')      : [];
-  $: pmassSeries    = showMultiLine ? buildSeries('pmass25')  : [];
-  $: noxSeries      = showMultiLine ? buildSeries('NOx')      : [];
-  $: hchoSeries     = showMultiLine ? buildSeries('HCHO')     : [];
-  $: dpSeries       = showMultiLine ? buildSeries('indoorTd') : [];
 
   // Persistent custom names — stored in localStorage as { "1": "Living Room", ... }
   let locationNames: Record<string, string> = {};
@@ -221,37 +200,18 @@
     }
   }
 
-  function buildDataUrl(location?: string): URL {
-    const url = new URL(getApiUrl('sensor-data'), window.location.origin);
-    if (location) url.searchParams.append('location', location);
-    if (startDate) url.searchParams.append('startDate', `${startDate}T${startHour.toString().padStart(2, '0')}:00:00`);
-    if (endDate)   url.searchParams.append('endDate',   `${endDate}T${endHour.toString().padStart(2, '0')}:59:59`);
-    return url;
-  }
-
   // Fetch data with the current date range and selected location
   async function fetchData() {
     loading = true;
     error = null;
     try {
-      if (selectedLocation === null && availableLocations.length > 1) {
-        // Fetch each location in parallel so charts can show per-location lines.
-        const results = await Promise.all(
-          availableLocations.map(async loc => {
-            const res = await fetch(buildDataUrl(loc.location));
-            if (!res.ok) throw new Error(`HTTP error: ${res.status}`);
-            return { loc: loc.location, data: await res.json() as NormalizedSensorData[] };
-          })
-        );
-        allLocationData = results;
-        sensorData = results.flatMap(r => r.data)
-          .sort((a, b) => new Date(a.recTime).getTime() - new Date(b.recTime).getTime());
-      } else {
-        const response = await fetch(buildDataUrl(selectedLocation ?? undefined));
-        if (!response.ok) throw new Error(`HTTP error: ${response.status}`);
-        sensorData = await response.json();
-        allLocationData = [];
-      }
+      const url = new URL(getApiUrl('sensor-data'), window.location.origin);
+      if (selectedLocation !== null) url.searchParams.append('location', selectedLocation);
+      if (startDate) url.searchParams.append('startDate', `${startDate}T${startHour.toString().padStart(2, '0')}:00:00`);
+      if (endDate)   url.searchParams.append('endDate',   `${endDate}T${endHour.toString().padStart(2, '0')}:59:59`);
+      const response = await fetch(url);
+      if (!response.ok) throw new Error(`HTTP error: ${response.status}`);
+      sensorData = await response.json();
       updateCharts();
       loading = false;
     } catch (err) {
@@ -379,15 +339,13 @@
   }
 
   // Initial load
-  onMount(async () => {
+  onMount(() => {
     setDefaultDateRange();
-    // Names are cosmetic — fetch in background, never block page load.
     fetch(getApiUrl('location-names'))
       .then(r => r.ok ? r.json() : {})
       .then(names => { locationNames = names ?? {}; })
       .catch(() => {});
-    // Locations must finish before data so multi-line mode works on first load.
-    await fetchLocations();
+    fetchLocations();
     fetchData();
   });
 </script>
@@ -586,36 +544,24 @@
           <div class="card-header">
             <h2 class="card-title">Temperature</h2>
           </div>
-          {#if showMultiLine}
-            <MultiLineChart series={tempSeries} height={300} />
-          {:else}
-            <LineChart data={tempChart} label="Temperature (°F)" color="#ef4444"
-              yAxisOptions={tempAxisOptions} xAxisOptions={xAxisOptions} />
-          {/if}
+          <LineChart data={tempChart} label="Temperature (°F)" color="#ef4444"
+            yAxisOptions={tempAxisOptions} xAxisOptions={xAxisOptions} />
         </section>
 
         <section class="chart-card" style="border-left-color: #10b981">
           <div class="card-header">
             <h2 class="card-title">CO₂</h2>
           </div>
-          {#if showMultiLine}
-            <MultiLineChart series={co2Series} height={300} />
-          {:else}
-            <LineChart data={co2Chart} label="CO2 (ppm)" color="#10b981"
-              yAxisOptions={co2AxisOptions} xAxisOptions={xAxisOptions} />
-          {/if}
+          <LineChart data={co2Chart} label="CO2 (ppm)" color="#10b981"
+            yAxisOptions={co2AxisOptions} xAxisOptions={xAxisOptions} />
         </section>
 
         <section class="chart-card" style="border-left-color: #3b82f6">
           <div class="card-header">
             <h2 class="card-title">Humidity</h2>
           </div>
-          {#if showMultiLine}
-            <MultiLineChart series={humiditySeries} height={300} />
-          {:else}
-            <LineChart data={humidityChart} label="Humidity (%)" color="#3b82f6"
-              xAxisOptions={xAxisOptions} />
-          {/if}
+          <LineChart data={humidityChart} label="Humidity (%)" color="#3b82f6"
+            xAxisOptions={xAxisOptions} />
         </section>
 
         <section class="chart-card" style="border-left-color: #8b5cf6">
@@ -623,24 +569,16 @@
             <h2 class="card-title">VOC</h2>
             <p class="card-note">Volatile Organic Compound index (1–500). Relative to the sensor's 24-hour rolling baseline — a value of 100 represents the average VOC level. Values above 100 indicate more VOCs than the recent average (e.g., cooking, cleaning); values below 100 indicate fewer VOCs (e.g., fresh air from an open window or air purifier).</p>
           </div>
-          {#if showMultiLine}
-            <MultiLineChart series={vocSeries} height={300} />
-          {:else}
-            <LineChart data={vocChart} label="VOC Index" color="#8b5cf6"
-              yAxisOptions={vocAxisOptions} xAxisOptions={xAxisOptions} />
-          {/if}
+          <LineChart data={vocChart} label="VOC Index" color="#8b5cf6"
+            yAxisOptions={vocAxisOptions} xAxisOptions={xAxisOptions} />
         </section>
 
         <section class="chart-card" style="border-left-color: #f59e0b">
           <div class="card-header">
             <h2 class="card-title">Particulate Matter (PM2.5)</h2>
           </div>
-          {#if showMultiLine}
-            <MultiLineChart series={pmassSeries} height={300} />
-          {:else}
-            <LineChart data={pmassChart} label="PM2.5 (μg/m³)" color="#f59e0b"
-              yAxisOptions={pmAxisOptions} xAxisOptions={xAxisOptions} />
-          {/if}
+          <LineChart data={pmassChart} label="PM2.5 (μg/m³)" color="#f59e0b"
+            yAxisOptions={pmAxisOptions} xAxisOptions={xAxisOptions} />
         </section>
 
         <section class="chart-card" style="border-left-color: #f97316">
@@ -648,36 +586,24 @@
             <h2 class="card-title">NOx</h2>
             <p class="card-note">Nitrogen Oxides index (1–500). Relative to the sensor's 24-hour rolling baseline — a value of 1 means (nearly) no NOx detected. Values above 1 indicate elevated oxidising gases; spikes above 20 are typical of gas cooking or similar sources.</p>
           </div>
-          {#if showMultiLine}
-            <MultiLineChart series={noxSeries} height={300} />
-          {:else}
-            <LineChart data={noxChart} label="NOx Index" color="#f97316"
-              yAxisOptions={noxAxisOptions} xAxisOptions={xAxisOptions} />
-          {/if}
+          <LineChart data={noxChart} label="NOx Index" color="#f97316"
+            yAxisOptions={noxAxisOptions} xAxisOptions={xAxisOptions} />
         </section>
 
         <section class="chart-card" style="border-left-color: #06b6d4">
           <div class="card-header">
             <h2 class="card-title">Formaldehyde (HCHO)</h2>
           </div>
-          {#if showMultiLine}
-            <MultiLineChart series={hchoSeries} height={300} />
-          {:else}
-            <LineChart data={hchoChart} label="HCHO (ppb)" color="#06b6d4"
-              yAxisOptions={hchoAxisOptions} xAxisOptions={xAxisOptions} />
-          {/if}
+          <LineChart data={hchoChart} label="HCHO (ppb)" color="#06b6d4"
+            yAxisOptions={hchoAxisOptions} xAxisOptions={xAxisOptions} />
         </section>
 
         <section class="chart-card" style="border-left-color: #64748b">
           <div class="card-header">
             <h2 class="card-title">Dew Point</h2>
           </div>
-          {#if showMultiLine}
-            <MultiLineChart series={dpSeries} height={300} />
-          {:else}
-            <LineChart data={dpChart} label="Dew Point (°F)" color="#64748b"
-              yAxisOptions={dpAxisOptions} xAxisOptions={xAxisOptions} />
-          {/if}
+          <LineChart data={dpChart} label="Dew Point (°F)" color="#64748b"
+            yAxisOptions={dpAxisOptions} xAxisOptions={xAxisOptions} />
         </section>
 
       </div>
