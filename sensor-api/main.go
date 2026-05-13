@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	_ "github.com/go-sql-driver/mysql"
@@ -118,6 +119,89 @@ func isNaN(val float64) bool {
 func isInf(val float64, sign int) bool {
 	return (sign >= 0 && val > 1.797693134862315708145274237317043567981e+308) ||
 		(sign <= 0 && val < -1.797693134862315708145274237317043567981e+308)
+}
+
+// initLocationNamesTable creates the location_names table if it does not already exist.
+func initLocationNamesTable() error {
+	_, err := db.Exec(`CREATE TABLE IF NOT EXISTS location_names (
+		location VARCHAR(50) NOT NULL PRIMARY KEY,
+		name     VARCHAR(100) NOT NULL
+	) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`)
+	return err
+}
+
+// GetLocationNames returns all custom location names as a map[location]name.
+func GetLocationNames() (map[string]string, error) {
+	rows, err := db.Query("SELECT location, name FROM location_names")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	m := make(map[string]string)
+	for rows.Next() {
+		var loc, name string
+		if err := rows.Scan(&loc, &name); err != nil {
+			return nil, err
+		}
+		m[loc] = name
+	}
+	return m, rows.Err()
+}
+
+// SetLocationName upserts a custom display name for a location.
+func SetLocationName(location, name string) error {
+	_, err := db.Exec(
+		"INSERT INTO location_names (location, name) VALUES (?, ?) ON DUPLICATE KEY UPDATE name = ?",
+		location, name, name,
+	)
+	return err
+}
+
+// DeleteLocationName removes the custom name for a location.
+func DeleteLocationName(location string) error {
+	_, err := db.Exec("DELETE FROM location_names WHERE location = ?", location)
+	return err
+}
+
+// handleGetLocationNames returns all custom location names as a JSON object.
+func handleGetLocationNames(w http.ResponseWriter, r *http.Request) {
+	names, err := GetLocationNames()
+	if err != nil {
+		log.Printf("Error fetching location names: %v", err)
+		http.Error(w, "Failed to fetch location names", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(names)
+}
+
+// handlePutLocationName sets a custom name for a single location.
+func handlePutLocationName(w http.ResponseWriter, r *http.Request) {
+	location := mux.Vars(r)["location"]
+	var body struct {
+		Name string `json:"name"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || strings.TrimSpace(body.Name) == "" {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+	if err := SetLocationName(location, strings.TrimSpace(body.Name)); err != nil {
+		log.Printf("Error setting location name: %v", err)
+		http.Error(w, "Failed to set location name", http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleDeleteLocationName removes the custom name for a location.
+func handleDeleteLocationName(w http.ResponseWriter, r *http.Request) {
+	location := mux.Vars(r)["location"]
+	if err := DeleteLocationName(location); err != nil {
+		log.Printf("Error deleting location name: %v", err)
+		http.Error(w, "Failed to delete location name", http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // GetLocations retrieves the distinct sensor locations from the database
@@ -346,12 +430,19 @@ func main() {
 		log.Fatalf("Failed to connect to database: %v", err)
 	}
 	defer db.Close()
-	
+
+	if err := initLocationNamesTable(); err != nil {
+		log.Fatalf("Failed to create location_names table: %v", err)
+	}
+
 	// Create router
 	r := mux.NewRouter()
 	
 	// Define API routes
 	r.HandleFunc("/api/locations", handleGetLocations).Methods("GET")
+	r.HandleFunc("/api/location-names", handleGetLocationNames).Methods("GET")
+	r.HandleFunc("/api/location-names/{location}", handlePutLocationName).Methods("PUT")
+	r.HandleFunc("/api/location-names/{location}", handleDeleteLocationName).Methods("DELETE")
 	r.HandleFunc("/api/sensor-data", handleGetSensorData).Methods("GET")
 	r.HandleFunc("/api/sensor-data", handlePostSensorData).Methods("POST")
 	r.HandleFunc("/api/sensor-data/latest", handleGetLatestSensorData).Methods("GET")

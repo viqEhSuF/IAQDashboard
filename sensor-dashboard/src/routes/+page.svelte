@@ -45,14 +45,22 @@
   function saveEdit() {
     if (editingLocation === null) return;
     const trimmed = editingValue.trim();
-    if (trimmed) {
-      locationNames[editingLocation] = trimmed;
-    } else {
-      delete locationNames[editingLocation];
-    }
-    locationNames = { ...locationNames };
-    localStorage.setItem('iaq-location-names', JSON.stringify(locationNames));
+    const loc = editingLocation;
     editingLocation = null;
+
+    if (trimmed) {
+      locationNames = { ...locationNames, [loc]: trimmed };
+      fetch(getApiUrl(`location-names/${loc}`), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: trimmed })
+      }).catch(err => console.error('Failed to save location name:', err));
+    } else {
+      const { [loc]: _, ...rest } = locationNames;
+      locationNames = rest;
+      fetch(getApiUrl(`location-names/${loc}`), { method: 'DELETE' })
+        .catch(err => console.error('Failed to delete location name:', err));
+    }
   }
 
   // Svelte action: focus an input as soon as it mounts.
@@ -354,11 +362,11 @@
   }
 
   // Initial load
-  onMount(() => {
+  onMount(async () => {
     try {
-      const saved = localStorage.getItem('iaq-location-names');
-      if (saved) locationNames = JSON.parse(saved);
-    } catch { /* ignore corrupt storage */ }
+      const res = await fetch(getApiUrl('location-names'));
+      if (res.ok) locationNames = (await res.json()) ?? {};
+    } catch { /* non-fatal — names fall back to "Location N" */ }
     setDefaultDateRange();
     fetchLocations();
     fetchData();
