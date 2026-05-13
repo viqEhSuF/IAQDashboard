@@ -19,19 +19,45 @@
   // keeping each line continuous within its own data.
   type JoinedRecord = Record<string, number>;
 
+  // 30 minutes — gaps longer than this are real offline periods and kept as NaN.
+  const GAP_THRESHOLD_MS = 30 * 60 * 1000;
+
   $: joinedData = (() => {
     if (activeSeries.length === 0) return [] as JoinedRecord[];
     const xSet = new Set<number>();
     for (const s of activeSeries) for (const pt of s.data) xSet.add(pt.x);
     const allX = Array.from(xSet).sort((a, b) => a - b);
+
     const maps = activeSeries.map(s => {
       const m = new Map<number, number>();
       for (const pt of s.data) m.set(pt.x, pt.y);
       return m;
     });
+
+    // Sorted x-arrays per series for interpolation lookups.
+    const sortedXs = activeSeries.map(s =>
+      s.data.map(pt => pt.x).sort((a, b) => a - b)
+    );
+
+    function interpolate(si: number, xVal: number): number {
+      const m = maps[si];
+      if (m.has(xVal)) return m.get(xVal)!;
+      const xs = sortedXs[si];
+      if (xs.length < 2) return NaN;
+      // Binary search for the first xs entry >= xVal.
+      let lo = 0, hi = xs.length;
+      while (lo < hi) { const mid = (lo + hi) >> 1; if (xs[mid] < xVal) lo = mid + 1; else hi = mid; }
+      const ai = lo, bi = lo - 1;
+      if (bi < 0 || ai >= xs.length) return NaN;
+      const x1 = xs[bi], x2 = xs[ai];
+      if (x2 - x1 > GAP_THRESHOLD_MS) return NaN;
+      const y1 = m.get(x1)!, y2 = m.get(x2)!;
+      return y1 + (y2 - y1) * (xVal - x1) / (x2 - x1);
+    }
+
     return allX.map(xVal => {
       const rec: JoinedRecord = { x: xVal };
-      maps.forEach((m, i) => { rec[`y${i}`] = m.get(xVal) ?? NaN; });
+      maps.forEach((_, i) => { rec[`y${i}`] = interpolate(i, xVal); });
       return rec;
     });
   })();
