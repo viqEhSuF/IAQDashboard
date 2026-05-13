@@ -31,7 +31,7 @@ type SensorData struct {
 	Pmass10  float64   `json:"pmass10" db:"pmass10"`
 	HCHO     float64   `json:"HCHO" db:"HCHO"`
 	CO2      float64   `json:"CO2" db:"CO2"`
-	IndoorTd float64   `json:"indoorTd" db:"indoorTd"`
+	IndoorTd float64   `json:"indoorTd" db:"DP"`
 	Tags     []string  `json:"tags,omitempty"` // Optional tags field
 }
 
@@ -132,7 +132,7 @@ func GetLocations() ([]LocationData, error) {
 
 // GetSensorData retrieves sensor data from the database with optional filtering
 func GetSensorData(limit int, startDate, endDate, location string) ([]SensorData, error) {
-	query := "SELECT id, location, recTime, temp, rH, VOC, NOx, pmass1, pmass25, pmass4, pmass10, HCHO, CO2, indoorTd FROM IAQ_SEN55"
+	query := "SELECT id, location, recTime, temp, rH, VOC, NOx, pmass1, pmass25, pmass4, pmass10, HCHO, CO2, DP FROM IAQ_SEN55"
 	conditions := []string{}
 	args := []interface{}{}
 
@@ -205,8 +205,8 @@ func InsertSensorData(data SensorData) error {
 	// Insert data into database
 	_, err = db.Exec(`
 		INSERT INTO IAQ_SEN55 (
-			location, temp, rH, pmass1, pmass25, pmass4, pmass10, 
-			VOC, NOx, HCHO, CO2, indoorTd
+			location, temp, rH, pmass1, pmass25, pmass4, pmass10,
+			VOC, NOx, HCHO, CO2, DP
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		locNum, data.Temp, data.RH, data.Pmass1, data.Pmass25, data.Pmass4, data.Pmass10,
 		data.VOC, data.NOx, data.HCHO, data.CO2, data.IndoorTd,
