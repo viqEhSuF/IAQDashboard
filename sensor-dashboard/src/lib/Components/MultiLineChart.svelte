@@ -141,7 +141,8 @@
         highlightOnHover={true}
       />
       <VisAxis type="x" position="bottom" label="Time" numTicks={6} gridLine={true} tickFormat={xTickFormat} />
-      <VisAxis type="y" position="left" numTicks={5} gridLine={true} />
+      <VisAxis type="y" position="left" numTicks={5} gridLine={true}
+        tickFormat={isDualAxis ? (v: number) => v.toFixed(1) : undefined} />
       {#if isDualAxis}
         <VisAxis type="y" position="right" numTicks={5} gridLine={false} tickFormat={rightTickFormat} />
       {/if}
