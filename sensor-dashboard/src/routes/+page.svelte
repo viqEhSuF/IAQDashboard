@@ -280,7 +280,8 @@
 
   let overlayLocations: string[] = [];
   let overlayMetrics: (keyof NormalizedSensorData)[] = [];
-  let overlaySeries: { data: { x: number; y: number }[]; color: string; label: string }[] = [];
+  let overlayMetricsRight: (keyof NormalizedSensorData)[] = [];
+  let overlaySeries: { data: { x: number; y: number }[]; color: string; label: string; axis?: 'left' | 'right' }[] = [];
   let overlayLoading = false;
   let overlayError: string | null = null;
 
@@ -294,6 +295,12 @@
     overlayMetrics = overlayMetrics.includes(field)
       ? overlayMetrics.filter(f => f !== field)
       : [...overlayMetrics, field];
+  }
+
+  function toggleOverlayMetricRight(field: keyof NormalizedSensorData) {
+    overlayMetricsRight = overlayMetricsRight.includes(field)
+      ? overlayMetricsRight.filter(f => f !== field)
+      : [...overlayMetricsRight, field];
   }
 
   function overlayLabel(loc: string, metricLabel: string): string {
@@ -328,7 +335,18 @@
           built.push({
             data: createTimeSeriesData(data, field),
             color: OVERLAY_COLORS[colorIdx % OVERLAY_COLORS.length],
-            label: overlayLabel(loc, metricDef.label)
+            label: overlayLabel(loc, metricDef.label),
+            axis: 'left'
+          });
+          colorIdx++;
+        }
+        for (const field of overlayMetricsRight) {
+          const metricDef = OVERLAY_METRICS.find(m => m.field === field)!;
+          built.push({
+            data: createTimeSeriesData(data, field),
+            color: OVERLAY_COLORS[colorIdx % OVERLAY_COLORS.length],
+            label: overlayLabel(loc, metricDef.label),
+            axis: 'right'
           });
           colorIdx++;
         }
@@ -628,8 +646,8 @@
           </div>
         </div>
 
-        <div class="mb-5">
-          <div class="text-sm font-medium text-gray-600 mb-2">Metrics</div>
+        <div class="mb-4">
+          <div class="text-sm font-medium text-gray-600 mb-2">Metrics — Left Axis</div>
           <div class="flex flex-wrap gap-2">
             {#each OVERLAY_METRICS as m}
               <button
@@ -642,21 +660,35 @@
           </div>
         </div>
 
+        <div class="mb-5">
+          <div class="text-sm font-medium text-gray-600 mb-1">Metrics — Right Axis <span class="text-xs font-normal text-gray-400">optional · use for metrics with a different scale</span></div>
+          <div class="flex flex-wrap gap-2">
+            {#each OVERLAY_METRICS as m}
+              <button
+                on:click={() => toggleOverlayMetricRight(m.field)}
+                class="px-4 py-1.5 rounded-full text-sm font-medium transition-colors {overlayMetricsRight.includes(m.field) ? 'bg-orange-500 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}"
+              >
+                {m.label}
+              </button>
+            {/each}
+          </div>
+        </div>
+
         <div class="flex items-center gap-3 pb-5 border-b border-gray-100">
           <button
             on:click={generateOverlay}
-            disabled={overlayLocations.length === 0 || overlayMetrics.length === 0 || overlayLoading}
+            disabled={overlayLocations.length === 0 || (overlayMetrics.length === 0 && overlayMetricsRight.length === 0) || overlayLoading}
             class="px-5 py-2 rounded-lg text-sm font-semibold bg-slate-700 text-white hover:bg-slate-800 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
           >
             {overlayLoading ? 'Loading…' : 'Generate Chart'}
           </button>
           <span class="text-xs text-gray-400">
-            {#if overlayLocations.length === 0 || overlayMetrics.length === 0}
+            {#if overlayLocations.length === 0 || (overlayMetrics.length === 0 && overlayMetricsRight.length === 0)}
               Select at least one location and one metric
             {:else}
               {overlayLocations.length} location{overlayLocations.length > 1 ? 's' : ''}
-              · {overlayMetrics.length} metric{overlayMetrics.length > 1 ? 's' : ''}
-              · {overlayLocations.length * overlayMetrics.length} series
+              · {overlayMetrics.length + overlayMetricsRight.length} metric{(overlayMetrics.length + overlayMetricsRight.length) > 1 ? 's' : ''}
+              · {overlayLocations.length * (overlayMetrics.length + overlayMetricsRight.length)} series
             {/if}
           </span>
         </div>
