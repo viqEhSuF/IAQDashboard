@@ -14,11 +14,10 @@
   export let height: number = 380;
 
   $: activeSeries = series.filter(s => s.data.length > 0);
-  $: leftSeries  = activeSeries.filter(s => (s.axis ?? 'left') === 'left');
-  $: rightSeries = activeSeries.filter(s => s.axis === 'right');
-  $: isDualAxis  = leftSeries.length > 0 && rightSeries.length > 0;
+  $: leftSeries   = activeSeries.filter(s => (s.axis ?? 'left') === 'left');
+  $: rightSeries  = activeSeries.filter(s => s.axis === 'right');
+  $: isDualAxis   = leftSeries.length > 0 && rightSeries.length > 0;
 
-  // Compute [min, max] with 5 % padding for a list of series.
   function domainOf(list: SeriesConfig[]): [number, number] {
     let lo = Infinity, hi = -Infinity;
     for (const s of list)
@@ -33,18 +32,8 @@
   $: leftDomain  = domainOf(isDualAxis ? leftSeries : activeSeries);
   $: rightDomain = isDualAxis ? domainOf(rightSeries) : leftDomain;
 
-  // Map a value from one linear domain to another.
-  function remap(v: number, from: [number, number], to: [number, number]): number {
-    if (isNaN(v)) return NaN;
-    return to[0] + (v - from[0]) / (from[1] - from[0]) * (to[1] - to[0]);
-  }
-
-  // Build joined data: one record per unique x, with y0/y1/... fields per series.
-  // Right-axis series are mapped into the left-axis coordinate space for rendering.
-  // NaN where a series has no reading at that timestamp.
-  type JoinedRecord = Record<string, number>;
-
   const GAP_THRESHOLD_MS = 30 * 60 * 1000;
+  type JoinedRecord = Record<string, number>;
 
   $: joinedData = (() => {
     if (activeSeries.length === 0) return [] as JoinedRecord[];
@@ -78,39 +67,31 @@
 
     return allX.map(xVal => {
       const rec: JoinedRecord = { x: xVal };
-      activeSeries.forEach((s, i) => {
-        const raw = interpolate(i, xVal);
-        // Right-axis series: remap into left-axis coordinate space so Unovis's
-        // single y-scale renders them correctly.
-        rec[`y${i}`] = (isDualAxis && s.axis === 'right')
-          ? remap(raw, rightDomain, leftDomain)
-          : raw;
-      });
+      activeSeries.forEach((_, i) => { rec[`y${i}`] = interpolate(i, xVal); });
       return rec;
     });
   })();
 
-  $: xAccessor  = (d: JoinedRecord) => d.x;
-  $: yAccessors = activeSeries.map((_, i) => (d: JoinedRecord) => d[`y${i}`]);
-  $: colors     = activeSeries.map(s => s.color);
-  $: crosshairY = yAccessors[0] ?? ((d: JoinedRecord) => d.y0);
+  $: leftIndices  = activeSeries.map((_, i) => i).filter(i => (activeSeries[i].axis ?? 'left') === 'left');
+  $: rightIndices = activeSeries.map((_, i) => i).filter(i => activeSeries[i].axis === 'right');
 
-  // Right-axis tick labels: convert normalised left-domain position → actual right-axis value.
-  $: rightTickFormat = isDualAxis
-    ? (v: number) => {
-        const actual = remap(v, leftDomain, rightDomain);
-        return isNaN(actual) ? '' : actual.toFixed(0);
-      }
-    : undefined;
+  $: xAccessor       = (d: JoinedRecord) => d.x;
+  $: leftYAccessors  = leftIndices.map(i => (d: JoinedRecord) => d[`y${i}`]);
+  $: rightYAccessors = rightIndices.map(i => (d: JoinedRecord) => d[`y${i}`]);
+  $: leftColors      = leftIndices.map(i => activeSeries[i].color);
+  $: rightColors     = rightIndices.map(i => activeSeries[i].color);
+
+  $: allYAccessors = activeSeries.map((_, i) => (d: JoinedRecord) => d[`y${i}`]);
+  $: allColors     = activeSeries.map(s => s.color);
+
+  $: crosshairY = (isDualAxis ? leftYAccessors[0] : allYAccessors[0]) ?? ((d: JoinedRecord) => d.y0);
 
   $: crosshairTemplate = (d: JoinedRecord) => {
     const time = new Date(d.x).toLocaleString(undefined, {
       month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
     });
     const rows = activeSeries.map((s, i) => {
-      let val = d[`y${i}`];
-      // Convert normalised rendering value back to actual for display.
-      if (isDualAxis && s.axis === 'right') val = remap(val, leftDomain, rightDomain);
+      const val = d[`y${i}`];
       if (isNaN(val) || val === undefined) return '';
       return `<div style="display:flex;align-items:center;gap:6px;margin-top:3px">
         <span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${s.color};flex-shrink:0"></span>
@@ -125,46 +106,69 @@
 
   const xTickFormat = (v: number) =>
     new Date(v).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit' });
+
+  // Shared fixed margins so both overlaid containers align perfectly.
+  const dualMargin = { top: 10, right: 70, bottom: 50, left: 70 };
 </script>
 
 <div class="multi-chart">
   {#if activeSeries.length === 0}
     <div class="empty">No data to display</div>
+  {:else if isDualAxis}
+    <div class="dual-wrap">
+      <!-- Base container: left-axis series, x-axis, left y-axis, crosshair -->
+      <VisXYContainer data={joinedData} {height} yDomain={leftDomain} margin={dualMargin} autoMargin={false}>
+        <VisLine x={xAccessor} y={leftYAccessors} color={leftColors}
+          curveType="monotoneX" lineWidth={2} highlightOnHover={true} />
+        <VisAxis type="x" position="bottom" label="Time" numTicks={6} gridLine={true} tickFormat={xTickFormat} />
+        <VisAxis type="y" position="left" numTicks={5} gridLine={true} />
+        <VisCrosshair x={xAccessor} y={crosshairY} color={activeSeries[0]?.color ?? '#1d4ed8'} template={crosshairTemplate} />
+        <VisTooltip />
+      </VisXYContainer>
+      <!-- Overlay container: right-axis series and right y-axis only -->
+      <div class="overlay">
+        <VisXYContainer data={joinedData} {height} yDomain={rightDomain} margin={dualMargin} autoMargin={false}>
+          <VisLine x={xAccessor} y={rightYAccessors} color={rightColors}
+            curveType="monotoneX" lineWidth={2} />
+          <VisAxis type="y" position="right" numTicks={5} gridLine={false} />
+        </VisXYContainer>
+      </div>
+    </div>
   {:else}
-    <VisXYContainer data={joinedData} {height} yDomain={isDualAxis ? leftDomain : undefined}>
-      <VisLine
-        x={xAccessor}
-        y={yAccessors}
-        color={colors}
-        curveType="monotoneX"
-        lineWidth={2}
-        highlightOnHover={true}
-      />
+    <VisXYContainer data={joinedData} {height}>
+      <VisLine x={xAccessor} y={allYAccessors} color={allColors}
+        curveType="monotoneX" lineWidth={2} highlightOnHover={true} />
       <VisAxis type="x" position="bottom" label="Time" numTicks={6} gridLine={true} tickFormat={xTickFormat} />
-      <VisAxis type="y" position="left" numTicks={5} gridLine={true}
-        tickFormat={isDualAxis ? (v: number) => v.toFixed(1) : undefined} />
-      {#if isDualAxis}
-        <VisAxis type="y" position="right" numTicks={5} gridLine={false} tickFormat={rightTickFormat} />
-      {/if}
+      <VisAxis type="y" position="left" numTicks={5} gridLine={true} />
       <VisCrosshair x={xAccessor} y={crosshairY} color={activeSeries[0]?.color ?? '#1d4ed8'} template={crosshairTemplate} />
       <VisTooltip />
     </VisXYContainer>
-
-    <div class="legend">
-      {#each activeSeries as s}
-        <div class="legend-item">
-          <span class="swatch" style="background:{s.color}"></span>
-          <span class="legend-label">
-            {s.label}{#if isDualAxis}<span class="axis-tag">{s.axis === 'right' ? 'R' : 'L'}</span>{/if}
-          </span>
-        </div>
-      {/each}
-    </div>
   {/if}
+
+  <div class="legend">
+    {#each activeSeries as s}
+      <div class="legend-item">
+        <span class="swatch" style="background:{s.color}"></span>
+        <span class="legend-label">
+          {s.label}{#if isDualAxis}<span class="axis-tag">{s.axis === 'right' ? 'R' : 'L'}</span>{/if}
+        </span>
+      </div>
+    {/each}
+  </div>
 </div>
 
 <style>
   .multi-chart { position: relative; }
+
+  .dual-wrap { position: relative; }
+
+  .overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    pointer-events: none;
+  }
 
   .empty {
     display: flex;
