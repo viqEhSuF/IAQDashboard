@@ -342,13 +342,15 @@
   }
 
   // Initial load
-  onMount(() => {
+  onMount(async () => {
     setDefaultDateRange();
+    // Names are cosmetic — load in the background, never block the page.
     fetch(getApiUrl('location-names'))
       .then(r => r.ok ? r.json() : {})
       .then(names => { locationNames = names ?? {}; })
       .catch(() => {});
-    fetchLocations();
+    // Must finish before fetchData so selectedLocation is set to the first location.
+    await fetchLocations();
     fetchData();
   });
 </script>
