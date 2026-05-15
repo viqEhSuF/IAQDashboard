@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	_ "github.com/go-sql-driver/mysql"
@@ -31,8 +32,13 @@ type SensorData struct {
 	Pmass10  float64   `json:"pmass10" db:"pmass10"`
 	HCHO     float64   `json:"HCHO" db:"HCHO"`
 	CO2      float64   `json:"CO2" db:"CO2"`
-	IndoorTd float64   `json:"indoorTd" db:"indoorTd"`
+	IndoorTd float64   `json:"indoorTd" db:"DP"`
 	Tags     []string  `json:"tags,omitempty"` // Optional tags field
+}
+
+// LocationData represents a distinct sensor location
+type LocationData struct {
+	Location string `json:"location" db:"location"`
 }
 
 // Database configuration - same as in your TypeScript app
@@ -60,7 +66,7 @@ func initDB() error {
 		log.Printf("Using default port 3306")
 		dbConfig.Port = 3306
 	}
-	dsn := fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?parseTime=true",
+	dsn := fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?parseTime=true&loc=Local",
 		dbConfig.User, dbConfig.Password, dbConfig.Host, dbConfig.Port, dbConfig.Database)
 	
 	var err error
@@ -115,23 +121,121 @@ func isInf(val float64, sign int) bool {
 		(sign <= 0 && val < -1.797693134862315708145274237317043567981e+308)
 }
 
+// initLocationNamesTable creates the location_names table if it does not already exist.
+func initLocationNamesTable() error {
+	_, err := db.Exec(`CREATE TABLE IF NOT EXISTS location_names (
+		location VARCHAR(50) NOT NULL PRIMARY KEY,
+		name     VARCHAR(100) NOT NULL
+	) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`)
+	return err
+}
+
+// GetLocationNames returns all custom location names as a map[location]name.
+func GetLocationNames() (map[string]string, error) {
+	rows, err := db.Query("SELECT location, name FROM location_names")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	m := make(map[string]string)
+	for rows.Next() {
+		var loc, name string
+		if err := rows.Scan(&loc, &name); err != nil {
+			return nil, err
+		}
+		m[loc] = name
+	}
+	return m, rows.Err()
+}
+
+// SetLocationName upserts a custom display name for a location.
+func SetLocationName(location, name string) error {
+	_, err := db.Exec(
+		"INSERT INTO location_names (location, name) VALUES (?, ?) ON DUPLICATE KEY UPDATE name = ?",
+		location, name, name,
+	)
+	return err
+}
+
+// DeleteLocationName removes the custom name for a location.
+func DeleteLocationName(location string) error {
+	_, err := db.Exec("DELETE FROM location_names WHERE location = ?", location)
+	return err
+}
+
+// handleGetLocationNames returns all custom location names as a JSON object.
+func handleGetLocationNames(w http.ResponseWriter, r *http.Request) {
+	names, err := GetLocationNames()
+	if err != nil {
+		log.Printf("Error fetching location names: %v", err)
+		http.Error(w, "Failed to fetch location names", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(names)
+}
+
+// handlePutLocationName sets a custom name for a single location.
+func handlePutLocationName(w http.ResponseWriter, r *http.Request) {
+	location := mux.Vars(r)["location"]
+	var body struct {
+		Name string `json:"name"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || strings.TrimSpace(body.Name) == "" {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+	if err := SetLocationName(location, strings.TrimSpace(body.Name)); err != nil {
+		log.Printf("Error setting location name: %v", err)
+		http.Error(w, "Failed to set location name", http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleDeleteLocationName removes the custom name for a location.
+func handleDeleteLocationName(w http.ResponseWriter, r *http.Request) {
+	location := mux.Vars(r)["location"]
+	if err := DeleteLocationName(location); err != nil {
+		log.Printf("Error deleting location name: %v", err)
+		http.Error(w, "Failed to delete location name", http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// GetLocations retrieves the distinct sensor locations from the database
+func GetLocations() ([]LocationData, error) {
+	var locations []LocationData
+	err := db.Select(&locations, "SELECT DISTINCT location FROM IAQ_SEN55 ORDER BY location")
+	if err != nil {
+		return nil, err
+	}
+	return locations, nil
+}
+
 // GetSensorData retrieves sensor data from the database with optional filtering
-func GetSensorData(limit int, startDate, endDate string) ([]SensorData, error) {
-	query := "SELECT id, location, recTime, temp, rH, VOC, NOx, pmass1, pmass25, pmass4, pmass10, HCHO, CO2, indoorTd FROM IAQ_SEN55"
+func GetSensorData(limit int, startDate, endDate, location string) ([]SensorData, error) {
+	query := "SELECT id, location, recTime, temp, rH, VOC, NOx, pmass1, pmass25, pmass4, pmass10, HCHO, CO2, DP FROM IAQ_SEN55"
 	conditions := []string{}
 	args := []interface{}{}
-	
+
+	if location != "" {
+		conditions = append(conditions, "location = ?")
+		args = append(args, location)
+	}
+
 	// Add date filtering if provided
 	if startDate != "" {
 		conditions = append(conditions, "recTime >= ?")
 		args = append(args, startDate)
 	}
-	
+
 	if endDate != "" {
 		conditions = append(conditions, "recTime <= ?")
 		args = append(args, endDate)
 	}
-	
+
 	// Build the WHERE clause if conditions exist
 	if len(conditions) > 0 {
 		query += " WHERE "
@@ -142,7 +246,7 @@ func GetSensorData(limit int, startDate, endDate string) ([]SensorData, error) {
 			query += condition
 		}
 	}
-	
+
 	// Add sorting and limit
 	query += " ORDER BY recTime DESC LIMIT ?"
 	args = append(args, limit)
@@ -185,8 +289,8 @@ func InsertSensorData(data SensorData) error {
 	// Insert data into database
 	_, err = db.Exec(`
 		INSERT INTO IAQ_SEN55 (
-			location, temp, rH, pmass1, pmass25, pmass4, pmass10, 
-			VOC, NOx, HCHO, CO2, indoorTd
+			location, temp, rH, pmass1, pmass25, pmass4, pmass10,
+			VOC, NOx, HCHO, CO2, DP
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		locNum, data.Temp, data.RH, data.Pmass1, data.Pmass25, data.Pmass4, data.Pmass10,
 		data.VOC, data.NOx, data.HCHO, data.CO2, data.IndoorTd,
@@ -195,13 +299,29 @@ func InsertSensorData(data SensorData) error {
 	return err
 }
 
+// API handler for listing distinct sensor locations
+func handleGetLocations(w http.ResponseWriter, r *http.Request) {
+	locations, err := GetLocations()
+	if err != nil {
+		log.Printf("Error fetching locations: %v", err)
+		http.Error(w, "Failed to fetch locations", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(locations); err != nil {
+		log.Printf("Error encoding locations response: %v", err)
+		http.Error(w, "Error encoding response", http.StatusInternalServerError)
+	}
+}
+
 // API handler for getting sensor data
 func handleGetSensorData(w http.ResponseWriter, r *http.Request) {
 	// Get query parameters
 	startDate := r.URL.Query().Get("startDate")
 	endDate := r.URL.Query().Get("endDate")
+	location := r.URL.Query().Get("location")
 	limitStr := r.URL.Query().Get("limit")
-	
+
 	// Default limit to 15000, as in your TypeScript API
 	limit := 15000
 	if limitStr != "" {
@@ -210,11 +330,11 @@ func handleGetSensorData(w http.ResponseWriter, r *http.Request) {
 			limit = parsedLimit
 		}
 	}
-	
-	log.Printf("Fetching data with range: %s to %s, limit: %d", startDate, endDate, limit)
-	
+
+	log.Printf("Fetching data with range: %s to %s, location: %q, limit: %d", startDate, endDate, location, limit)
+
 	// Get data from database
-	data, err := GetSensorData(limit, startDate, endDate)
+	data, err := GetSensorData(limit, startDate, endDate, location)
 	if err != nil {
 		log.Printf("Error fetching sensor data: %v", err)
 		http.Error(w, "Failed to fetch sensor data", http.StatusInternalServerError)
@@ -287,7 +407,7 @@ func handleGetLatestSensorData(w http.ResponseWriter, r *http.Request) {
 	}
 	
 	// Get latest data from database
-	data, err := GetSensorData(limit, "", "")
+	data, err := GetSensorData(limit, "", "", "")
 	if err != nil {
 		log.Printf("Error fetching latest sensor data: %v", err)
 		http.Error(w, "Failed to fetch latest sensor data", http.StatusInternalServerError)
@@ -310,11 +430,19 @@ func main() {
 		log.Fatalf("Failed to connect to database: %v", err)
 	}
 	defer db.Close()
-	
+
+	if err := initLocationNamesTable(); err != nil {
+		log.Printf("Warning: could not create location_names table: %v — location renaming will be unavailable", err)
+	}
+
 	// Create router
 	r := mux.NewRouter()
 	
 	// Define API routes
+	r.HandleFunc("/api/locations", handleGetLocations).Methods("GET")
+	r.HandleFunc("/api/location-names", handleGetLocationNames).Methods("GET")
+	r.HandleFunc("/api/location-names/{location}", handlePutLocationName).Methods("PUT")
+	r.HandleFunc("/api/location-names/{location}", handleDeleteLocationName).Methods("DELETE")
 	r.HandleFunc("/api/sensor-data", handleGetSensorData).Methods("GET")
 	r.HandleFunc("/api/sensor-data", handlePostSensorData).Methods("POST")
 	r.HandleFunc("/api/sensor-data/latest", handleGetLatestSensorData).Methods("GET")
