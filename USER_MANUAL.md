@@ -119,15 +119,21 @@ The horizontal axis adapts to the selected time range:
 
 ## Custom Overlay Chart
 
-The **Custom Overlay Chart**, found at the bottom of the page, lets you plot any combination of locations and metrics on a single chart — useful for comparing rooms or correlating different measurements.
+The **Custom Overlay Chart**, found at the bottom of the page, lets you plot any combination of locations and metrics on a single chart — useful for comparing rooms or correlating different measurements. It supports a **dual Y-axis** mode so metrics with very different scales (such as Temperature and CO₂) can be compared without either line appearing flat.
 
 ### How to Use It
 
 1. Under **Locations**, click one or more station buttons. A highlighted button is selected; click it again to deselect.
-2. Under **Metrics**, click one or more metrics to include.
-3. Click **Generate Chart**.
+2. Under **Metrics — Left Axis**, click one or more metrics. These are shown in indigo when selected and will be plotted against the left Y-axis.
+3. Under **Metrics — Right Axis** *(optional)*, click one or more metrics with a different scale. These are shown in orange when selected and will be plotted against the right Y-axis with its own independent scale.
+4. Click **Generate Chart**.
 
-The counter next to the button shows how many lines will be drawn (number of locations × number of metrics).
+The counter next to the button shows the total number of metrics selected and the total number of lines that will be drawn (locations × metrics).
+
+### Single vs. Dual Y-Axis
+
+- If you only select metrics from **Left Axis**, the chart uses a single Y-axis on the left.
+- If you select metrics from **both** rows, the chart uses two independent Y-axes — left for the indigo metrics, right for the orange metrics. Each axis scales to fit its own data, so no series appears flattened.
 
 ### Reading the Overlay Chart
 
@@ -136,15 +142,18 @@ The counter next to the button shows how many lines will be drawn (number of loc
   - One location, multiple metrics → labels show the metric name
   - Multiple locations, one metric → labels show the location name
   - Multiple of both → labels show "Location · Metric"
+- In dual Y-axis mode, each legend label has a small **L** or **R** tag showing which axis it belongs to
 - **Hover** anywhere on the chart to see a tooltip listing all series values at that moment
 
 ### Tips
 
-- Metrics with similar value ranges produce the most readable charts. Good combinations:
+- Use the **Right Axis** for any metric whose values are on a completely different scale to the left-axis metrics. Good dual-axis combinations:
+  - **Temperature** (left, °F) and **CO₂** (right, ppm)
+  - **Humidity** (left, %) and **PM2.5** (right, μg/m³)
+- Keep similar-scale metrics on the same axis for the clearest chart. Good single-axis combinations:
   - **VOC Index and NOx Index** (both 1–500)
   - **Temperature and Dew Point** (both °F)
   - **PM2.5 from multiple rooms** (same unit, comparable range)
-- Mixing very different scales (e.g. Temperature °F and CO₂ ppm) on the same chart can make the lower-range line appear flat. Use separate individual charts for those.
 - The time range and date filters set in the **Time Range** panel apply to the overlay chart as well — set your desired window before clicking Generate Chart.
 
 ---
@@ -163,5 +172,5 @@ Click **Last 24 Hours**, select the bedroom location, and review Temperature, Hu
 **Find when VOC levels were highest this week**
 Click **Last Week**, select a location, and look at the VOC chart. Hover the peaks to see the exact times.
 
-**See all sensors at once**
-Leave **All Locations** selected. All readings from all stations are combined into one line per chart — useful for a quick system-wide overview.
+**Compare Temperature and CO₂ in the same room**
+In the Overlay Chart, select one location, add Temperature to Left Axis and CO₂ to Right Axis, then click Generate Chart. Both lines will be clearly readable on their own scales.
