@@ -46,11 +46,7 @@ bun --version
 
 ```bash
 git clone https://github.com/viqEhSuF/IAQDashboard.git ~/IAQDashboard
-cd ~/IAQDashboard
-git checkout feature/location-filter
 ```
-
-> Once the feature branch is merged into `main`, use `main` instead.
 
 ---
 
