@@ -168,6 +168,75 @@ bun run deploy
 
 ---
 
+## Automatic daily updates
+
+The repository includes `update.sh`, which checks for upstream changes once per day and rebuilds only what changed. Set it up with a systemd timer:
+
+**1 — Make the script executable:**
+```bash
+chmod +x ~/IAQDashboard/update.sh
+```
+
+**2 — Create the systemd service** (`/etc/systemd/system/iaq-update.service`):
+```bash
+sudo nano /etc/systemd/system/iaq-update.service
+```
+```ini
+[Unit]
+Description=IAQ Dashboard Auto-Update
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/home/pi/IAQDashboard/update.sh
+StandardOutput=append:/var/log/iaq-update.log
+StandardError=append:/var/log/iaq-update.log
+```
+
+**3 — Create the systemd timer** (`/etc/systemd/system/iaq-update.timer`):
+```bash
+sudo nano /etc/systemd/system/iaq-update.timer
+```
+```ini
+[Unit]
+Description=Daily IAQ Dashboard Auto-Update
+
+[Timer]
+OnCalendar=daily
+Persistent=true
+RandomizedDelaySec=1800
+
+[Install]
+WantedBy=timers.target
+```
+
+> `Persistent=true` means the update runs immediately on next boot if the Pi was off when the timer was due. `RandomizedDelaySec=1800` staggers updates by up to 30 minutes so multiple Pis don't all hit GitHub at midnight simultaneously.
+
+**4 — Enable and start the timer:**
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable iaq-update.timer
+sudo systemctl start iaq-update.timer
+```
+
+**5 — Verify it is scheduled:**
+```bash
+systemctl list-timers iaq-update.timer
+```
+
+**To trigger an update immediately** (useful for testing):
+```bash
+sudo systemctl start iaq-update.service
+```
+
+**To view the update log:**
+```bash
+cat /var/log/iaq-update.log
+```
+
+---
+
 ## Updating after a code change
 
 ```bash
