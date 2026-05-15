@@ -178,6 +178,13 @@ chmod +x ~/IAQDashboard/update.sh
 ```
 
 **2 — Create the systemd service** (`/etc/systemd/system/iaq-update.service`):
+
+First, get the correct path for your user:
+```bash
+echo "ExecStart=$(readlink -f ~/IAQDashboard/update.sh)"
+```
+Copy the output — you will paste it into the service file below.
+
 ```bash
 sudo nano /etc/systemd/system/iaq-update.service
 ```
@@ -189,10 +196,11 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
-ExecStart=/home/pi/IAQDashboard/update.sh
+ExecStart=/home/YOUR_USERNAME/IAQDashboard/update.sh
 StandardOutput=append:/var/log/iaq-update.log
 StandardError=append:/var/log/iaq-update.log
 ```
+Replace `YOUR_USERNAME` with your actual username (e.g. `data`, not `pi`).
 
 **3 — Create the systemd timer** (`/etc/systemd/system/iaq-update.timer`):
 ```bash
