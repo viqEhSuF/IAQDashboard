@@ -172,10 +172,12 @@ bun run deploy
 
 The repository includes `update.sh`, which checks for upstream changes once per day and rebuilds only what changed. Set it up with a systemd timer:
 
-**1 — Make the script executable:**
+**1 — Make the script executable and allow root to run git in the repo:**
 ```bash
 chmod +x ~/IAQDashboard/update.sh
+sudo git config --system --add safe.directory ~/IAQDashboard
 ```
+The second command writes to `/etc/gitconfig` so that the service (which runs as root) can run git commands in a directory owned by your regular user. This is a one-time step.
 
 **2 — Create the systemd service** (`/etc/systemd/system/iaq-update.service`):
 
