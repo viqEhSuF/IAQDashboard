@@ -194,6 +194,9 @@
       const response = await fetch(getApiUrl('locations'));
       if (response.ok) {
         availableLocations = await response.json();
+        if (selectedLocation === null && availableLocations.length > 0) {
+          selectedLocation = availableLocations[0].location;
+        }
       }
     } catch (err) {
       console.error('Error fetching locations:', err);
@@ -377,12 +380,6 @@
       <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
         <h2 class="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Sensor Location</h2>
         <div class="flex flex-wrap gap-2">
-          <button
-            on:click={() => { selectedLocation = null; fetchData(); }}
-            class="px-4 py-1.5 rounded-full text-sm font-medium transition-colors {selectedLocation === null ? 'bg-slate-700 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}"
-          >
-            All Locations
-          </button>
           {#each availableLocations as loc}
             {#if editingLocation === loc.location}
               <div class="flex items-center gap-1">
