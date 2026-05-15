@@ -11,11 +11,11 @@ for d in /home/*/.bun/bin /root/.bun/bin; do
   [ -d "$d" ] && export PATH=$PATH:$d
 done
 
-cd "$REPO_DIR"
-
-# Service runs as root; git refuses to operate on a repo owned by another user
-# unless the directory is explicitly marked safe.
+# Mark the repo safe for root BEFORE cd-ing in. Running git config from inside
+# the repo triggers the same ownership check we are trying to bypass.
 git config --global --add safe.directory "$REPO_DIR" 2>/dev/null || true
+
+cd "$REPO_DIR"
 
 echo "$STAMP Checking for updates..."
 if ! git fetch origin main 2>&1; then
