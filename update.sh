@@ -13,6 +13,10 @@ done
 
 cd "$REPO_DIR"
 
+# Service runs as root; git refuses to operate on a repo owned by another user
+# unless the directory is explicitly marked safe.
+git config --global --add safe.directory "$REPO_DIR" 2>/dev/null || true
+
 echo "$STAMP Checking for updates..."
 if ! git fetch origin main 2>&1; then
   echo "$STAMP git fetch failed — skipping update."
