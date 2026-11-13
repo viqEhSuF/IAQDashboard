@@ -13,14 +13,22 @@ done
 
 cd "$REPO_DIR"
 
-echo "$STAMP Checking for updates..."
-if ! git fetch origin main 2>&1; then
+# Follow the branch this copy was cloned on (v2 for systems on the new
+# database schema, main for older systems).
+BRANCH=$(git rev-parse --abbrev-ref HEAD)
+if [ "$BRANCH" = "HEAD" ]; then
+  echo "$STAMP Not on a branch (detached HEAD) — skipping update."
+  exit 1
+fi
+
+echo "$STAMP Checking for updates on $BRANCH..."
+if ! git fetch origin "$BRANCH" 2>&1; then
   echo "$STAMP git fetch failed — skipping update."
   exit 1
 fi
 
 LOCAL=$(git rev-parse HEAD)
-REMOTE=$(git rev-parse origin/main)
+REMOTE=$(git rev-parse "origin/$BRANCH")
 
 if [ "$LOCAL" = "$REMOTE" ]; then
   echo "$STAMP Already up to date."
@@ -29,10 +37,20 @@ fi
 
 echo "$STAMP Updates found — applying..."
 
-API_CHANGED=$(git diff --name-only HEAD..origin/main | grep -c '^sensor-api/' || true)
-FRONTEND_CHANGED=$(git diff --name-only HEAD..origin/main | grep -c '^sensor-dashboard/' || true)
+API_CHANGED=$(git diff --name-only "HEAD..origin/$BRANCH" | grep -c '^sensor-api/' || true)
+FRONTEND_CHANGED=$(git diff --name-only "HEAD..origin/$BRANCH" | grep -c '^sensor-dashboard/' || true)
+INGEST_CHANGED=$(git diff --name-only "HEAD..origin/$BRANCH" | grep -c '^ingest/iaq_ingest.php' || true)
 
-git pull origin main
+git pull origin "$BRANCH"
+
+# The ingest script's settings live in /etc/iaq/config.php and are not touched
+if [ "$INGEST_CHANGED" -gt 0 ]; then
+  if cp "$REPO_DIR/ingest/iaq_ingest.php" /var/www/html/iaq_ingest.php; then
+    echo "$STAMP Ingest script updated."
+  else
+    echo "$STAMP Ingest script copy failed."
+  fi
+fi
 
 if [ "$API_CHANGED" -gt 0 ]; then
   echo "$STAMP Building Go API..."

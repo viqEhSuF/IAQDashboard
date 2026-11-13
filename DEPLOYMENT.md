@@ -1,24 +1,28 @@
 # IAQDashboard — Raspberry Pi Deployment Checklist
 
-Target: Raspberry Pi 4 or 5 running Raspberry Pi OS (64-bit recommended).
+Target: Raspberry Pi 4 or 5 running 64-bit Raspberry Pi OS.
+
+> **This is the `v2` branch**, for systems on the new database schema
+> (`database/iaq_schema.sql`), where stations post raw readings to
+> `ingest/iaq_ingest.php` and calibration is applied in the database.
+> Systems still on the old `IAQ_SEN55` table stay on `main`.
 
 ---
 
 ## Prerequisites
 
-- [ ] MariaDB is installed and running with the `IAQ_SEN55` table populated
-- [ ] You have the database name, username, and password to hand
 - [ ] The Pi has internet access (for downloading dependencies)
 - [ ] You know the Pi's local IP address (`hostname -I`)
+- [ ] Stations run the matching firmware (`IAQ_SEN55_station.ino`, version `r4-sen55-2.x`)
 
 ---
 
 ## 1 — Install dependencies
 
-### Apache web server
+### Apache, PHP and MariaDB
 ```bash
 sudo apt update
-sudo apt install -y apache2
+sudo apt install -y apache2 libapache2-mod-php php-mysql mariadb-server
 sudo systemctl enable apache2
 sudo systemctl start apache2
 ```
@@ -42,11 +46,49 @@ bun --version
 
 ---
 
-## 2 — Clone the repository
+## 2 — Clone the repository (v2 branch)
 
 ```bash
-git clone https://github.com/viqEhSuF/IAQDashboard.git ~/IAQDashboard
+git clone -b v2 https://github.com/viqEhSuF/IAQDashboard.git ~/IAQDashboard
 ```
+
+The auto-updater follows the branch the copy was cloned on, so this system
+will only receive `v2` updates.
+
+---
+
+## 2a — Create the database
+
+Copy the schema, set real passwords in the copy (section 5 of the file), and
+run it. Keep the real passwords out of the repository.
+
+```bash
+cp ~/IAQDashboard/database/iaq_schema.sql ~/iaq_schema.sql
+nano ~/iaq_schema.sql      # replace CHANGE_ME_INGEST and CHANGE_ME_DASHBOARD
+sudo mariadb < ~/iaq_schema.sql
+rm ~/iaq_schema.sql
+```
+
+This creates the `buildingData` database and two local-only accounts:
+`iaq_ingest` for the ingest script and `iaq_dashboard` for the API below.
+
+---
+
+## 2b — Install the ingest script
+
+```bash
+sudo mkdir -p /etc/iaq
+sudo cp ~/IAQDashboard/ingest/iaq_config.php /etc/iaq/config.php
+sudo nano /etc/iaq/config.php      # set IAQ_DB_PASS to the iaq_ingest password
+sudo chown root:www-data /etc/iaq/config.php
+sudo chmod 640 /etc/iaq/config.php
+sudo cp ~/IAQDashboard/ingest/iaq_ingest.php /var/www/html/iaq_ingest.php
+```
+
+`iaq_ingest.php` accepts readings only from the station network
+(`IAQ_STATION_PREFIX` in the config, `192.168.10.` by default). Stations
+register themselves on their first post and appear in the dashboard, where
+they can be renamed.
 
 ---
 
@@ -71,7 +113,7 @@ ls -lh /usr/local/bin/sensor-api
 sudo nano /etc/systemd/system/sensor-api.service
 ```
 
-Paste the following, replacing the `MYSQL_*` values with your actual credentials:
+Paste the following, replacing `MYSQL_PASS` with the `iaq_dashboard` password:
 
 ```ini
 [Unit]
@@ -85,9 +127,9 @@ RestartSec=5
 Environment=PORT=8080
 Environment=MYSQL_HOST=localhost
 Environment=MYSQL_PORT=3306
-Environment=MYSQL_USER=your_db_user
-Environment=MYSQL_PASS=your_db_password
-Environment=MYSQL_DB=your_db_name
+Environment=MYSQL_USER=iaq_dashboard
+Environment=MYSQL_PASS=your_dashboard_password
+Environment=MYSQL_DB=buildingData
 
 [Install]
 WantedBy=multi-user.target
@@ -160,7 +202,8 @@ bun run deploy
 
 - [ ] Open `http://<pi-ip>/` in a browser on the local network
 - [ ] The dark header loads with the title "IAQ Dashboard"
-- [ ] Sensor location buttons appear (one per distinct location in the DB)
+- [ ] Sensor location buttons appear (one per station that has posted)
+- [ ] The Station Health panel shows each station as OK, with a recent report time
 - [ ] Selecting a location updates all charts
 - [ ] Date range presets (Last Hour, Last 6 Hours, Last 24 Hours) work
 - [ ] Charts load data and the crosshair tooltip appears on hover
@@ -274,6 +317,9 @@ bun run deploy
 |---|---|
 | Page loads but shows "Connection error" | `sudo systemctl status sensor-api` — is it running? Check DB credentials in the service file |
 | API returns 500 | `sudo journalctl -u sensor-api -n 50` — look for SQL errors (wrong column names, missing table) |
+| No locations appear | No station has posted yet. Check the station's serial monitor for `Server: HTTP/1.1 200 OK`, and `sudo grep "IAQ ingest" /var/log/apache2/error.log` |
+| Station shows Offline | It has not reported for over 10 minutes: check its power and WiFi |
+| Temperatures read a few degrees high | The station has no `temp_c` calibration row yet; see section 6 of `database/iaq_schema.sql` |
 | `go: command not found` | Re-run `source ~/.bashrc` or log out and back in |
 | `bun: command not found` | Re-run `source ~/.bashrc` or log out and back in |
 | `cp: Text file busy` when copying sensor-api | Stop the service first: `sudo systemctl stop sensor-api`, then copy, then start |
