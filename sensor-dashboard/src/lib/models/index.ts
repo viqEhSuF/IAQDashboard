@@ -1,22 +1,22 @@
 /**
- * IAQSen55 sensor data model that matches exactly what comes from the API
+ * IAQSen55 sensor data model that matches exactly what comes from the API.
+ * A measurement is null when the station had no valid reading for it.
  */
 export interface RawSensorData {
-  id: number;
   location: string;
   recTime: string;
   timestamp: string;
-  temp: string | number;
-  rH: number;
-  VOC: number;
-  NOx: string | number;
-  pmass1: number;
-  pmass25: number;
-  pmass4: number;
-  pmass10: number;
-  HCHO: string | number;
-  CO2: number;
-  indoorTd: string | number;
+  temp: number | null;
+  rH: number | null;
+  VOC: number | null;
+  NOx: number | null;
+  pmass1: number | null;
+  pmass25: number | null;
+  pmass4: number | null;
+  pmass10: number | null;
+  HCHO: number | null;
+  CO2: number | null;
+  indoorTd: number | null;
 }
 
 export interface LocationData {
@@ -27,19 +27,37 @@ export interface LocationData {
  * Normalized sensor data with consistent types
  */
 export interface NormalizedSensorData {
-  id: number;
   location: string;
   recTime: string;
   timestamp: string;
-  temp: number;
-  rH: number;
-  VOC: number;
-  NOx: number;
-  pmass1: number;
-  pmass25: number;
-  pmass4: number;
-  pmass10: number;
-  HCHO: number;
-  CO2: number;
-  indoorTd: number;
-} 
+  temp: number | null;
+  rH: number | null;
+  VOC: number | null;
+  NOx: number | null;
+  pmass1: number | null;
+  pmass25: number | null;
+  pmass4: number | null;
+  pmass10: number | null;
+  HCHO: number | null;
+  CO2: number | null;
+  indoorTd: number | null;
+}
+
+/**
+ * One station's status from /api/station-health. Fault flags cover the last
+ * 24 hours.
+ */
+export interface StationHealth {
+  location: string;
+  name: string | null;
+  firmware: string | null;
+  lastReading: string | null;
+  minutesSinceLast: number | null;
+  rssi: number | null;
+  uptimeS: number | null;
+  fanError: boolean;
+  laserError: boolean;
+  rhtError: boolean;
+  gasSensorError: boolean;
+  fanSpeedWarning: boolean;
+}

@@ -2,7 +2,7 @@
   import { onMount } from 'svelte';
   import LineChart from '$lib/Components/LineChart.svelte';
   import MultiLineChart from '$lib/Components/MultiLineChart.svelte';
-  import type { NormalizedSensorData, LocationData } from '$lib/models';
+  import type { NormalizedSensorData, LocationData, StationHealth } from '$lib/models';
   import { getApiUrl } from '$lib/config';
   
   // Define data record type that matches the LineChart component
@@ -28,7 +28,7 @@
   let availableLocations: LocationData[] = [];
   let selectedLocation: string | null = null;
 
-  // Persistent custom names — stored in localStorage as { "1": "Living Room", ... }
+  // Station names, stored in the database as { "1": "Living Room", ... }
   let locationNames: Record<string, string> = {};
   let editingLocation: string | null = null;
   let editingValue = '';
@@ -250,14 +250,73 @@
     dpChart = createTimeSeriesData(sensorData, 'indoorTd');
   }
   
+  // Readings with no value for this field (null) are left out rather than
+  // plotted as zero
   function createTimeSeriesData(data: NormalizedSensorData[], field: keyof NormalizedSensorData): DataRecord[] {
     return data
+      .filter(d => d[field] !== null && d[field] !== undefined)
       .map(d => ({
         x: new Date(d.recTime).getTime(),
         y: Number(d[field])
       }))
       .sort((a, b) => a.x - b.x);
   }
+
+  // ── Station health ─────────────────────────────────────────────────────
+
+  let stationHealth: StationHealth[] = [];
+
+  // A station reports every 2 minutes; 10 minutes means several missed reports
+  const OFFLINE_MINUTES = 10;
+  const WEAK_RSSI_DBM = -75;
+
+  async function fetchStationHealth() {
+    try {
+      const response = await fetch(getApiUrl('station-health'));
+      if (response.ok) stationHealth = await response.json();
+    } catch (err) {
+      console.error('Error fetching station health:', err);
+    }
+  }
+
+  function stationFaults(s: StationHealth): string[] {
+    const faults: string[] = [];
+    if (s.fanError) faults.push('Fan stopped');
+    if (s.laserError) faults.push('PM laser fault');
+    if (s.rhtError) faults.push('Temp/RH sensor fault');
+    if (s.gasSensorError) faults.push('VOC/NOx sensor fault');
+    return faults;
+  }
+
+  function stationWarnings(s: StationHealth): string[] {
+    const warnings: string[] = [];
+    if (s.fanSpeedWarning) warnings.push('Fan speed out of range');
+    if (s.rssi !== null && s.rssi < WEAK_RSSI_DBM) warnings.push('Weak WiFi signal');
+    return warnings;
+  }
+
+  function stationState(s: StationHealth): 'offline' | 'fault' | 'warning' | 'ok' {
+    if (s.minutesSinceLast === null || s.minutesSinceLast > OFFLINE_MINUTES) return 'offline';
+    if (stationFaults(s).length) return 'fault';
+    if (stationWarnings(s).length) return 'warning';
+    return 'ok';
+  }
+
+  function lastSeen(s: StationHealth): string {
+    if (s.minutesSinceLast === null) return 'No reports yet';
+    const m = s.minutesSinceLast;
+    if (m < 1) return 'Reported just now';
+    if (m < 60) return `Reported ${m} min ago`;
+    if (m < 48 * 60) return `Reported ${Math.round(m / 60)} h ago`;
+    return `Reported ${Math.round(m / 1440)} days ago`;
+  }
+
+  const STATE_STYLE = {
+    ok:      { dot: 'bg-emerald-500', text: 'OK' },
+    warning: { dot: 'bg-amber-400',   text: 'Warning' },
+    fault:   { dot: 'bg-red-500',     text: 'Fault' },
+    offline: { dot: 'bg-gray-400',    text: 'Offline' }
+  };
   
   // ── Overlay chart ───────────────────────────────────────────────────────
 
@@ -360,16 +419,20 @@
   }
 
   // Initial load
-  onMount(async () => {
+  onMount(() => {
     setDefaultDateRange();
     // Names are cosmetic — load in the background, never block the page.
     fetch(getApiUrl('location-names'))
       .then(r => r.ok ? r.json() : {})
       .then(names => { locationNames = names ?? {}; })
       .catch(() => {});
-    // Must finish before fetchData so selectedLocation is set to the first location.
-    await fetchLocations();
-    fetchData();
+    // fetchLocations must finish before fetchData so selectedLocation is set
+    // to the first location.
+    fetchLocations().then(fetchData);
+    // Station health refreshes on each 2-minute report cycle
+    fetchStationHealth();
+    const healthTimer = setInterval(fetchStationHealth, 120000);
+    return () => clearInterval(healthTimer);
   });
 </script>
 
@@ -431,6 +494,37 @@
                 </button>
               </div>
             {/if}
+          {/each}
+        </div>
+      </div>
+    {/if}
+
+    <!-- Station health -->
+    {#if stationHealth.length > 0}
+      <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
+        <h2 class="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Station Health</h2>
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          {#each stationHealth as s (s.location)}
+            {@const state = stationState(s)}
+            {@const issues = [...stationFaults(s), ...(s.fanSpeedWarning ? ['Fan speed out of range'] : [])]}
+            {@const weak = s.rssi !== null && s.rssi < WEAK_RSSI_DBM}
+            <div class="rounded-lg border border-gray-100 p-3">
+              <div class="flex items-center justify-between gap-2">
+                <span class="font-medium text-gray-700 truncate">{locationLabel(s.location)}</span>
+                <span class="flex items-center gap-1.5 text-xs font-medium text-gray-500 shrink-0">
+                  <span class="w-2 h-2 rounded-full {STATE_STYLE[state].dot}"></span>
+                  {STATE_STYLE[state].text}
+                </span>
+              </div>
+              <div class="text-xs text-gray-400 mt-1">
+                {lastSeen(s)}{#if s.rssi !== null} · <span class={weak ? 'text-amber-600' : ''}>{s.rssi} dBm{weak ? ' (weak)' : ''}</span>{/if}{#if s.firmware} · {s.firmware}{/if}
+              </div>
+              {#if issues.length > 0}
+                <div class="text-xs mt-1 {state === 'fault' ? 'text-red-600' : 'text-amber-600'}">
+                  {issues.join(' · ')} <span class="text-gray-400">(last 24 h)</span>
+                </div>
+              {/if}
+            </div>
           {/each}
         </div>
       </div>
