@@ -66,14 +66,23 @@ if [ "$API_CHANGED" -gt 0 ]; then
 fi
 
 if [ "$FRONTEND_CHANGED" -gt 0 ]; then
-  echo "$STAMP Building frontend..."
-  cd "$REPO_DIR/sensor-dashboard"
-  bun install
-  if bun run build; then
-    cp -r build/* /var/www/html/
-    echo "$STAMP Frontend deployed."
+  # The build needs about 1.5 GB of memory. On a 1 GB Pi it runs out and
+  # stalls the whole system, so skip it there; deploy a build made on another
+  # computer instead (DEPLOYMENT.md, section 6).
+  MEM_KB=$(awk '/^MemTotal:/ {print $2}' /proc/meminfo)
+  if [ "${MEM_KB:-0}" -lt 1500000 ]; then
+    echo "$STAMP Frontend changed, but this Pi has too little memory to build it."
+    echo "$STAMP Build it on another computer and copy it in (DEPLOYMENT.md, section 6)."
   else
-    echo "$STAMP Frontend build failed — leaving existing files in place."
+    echo "$STAMP Building frontend..."
+    cd "$REPO_DIR/sensor-dashboard"
+    bun install
+    if timeout 30m bun run build; then
+      cp -r build/* /var/www/html/
+      echo "$STAMP Frontend deployed."
+    else
+      echo "$STAMP Frontend build failed or timed out — leaving existing files in place."
+    fi
   fi
 fi
 

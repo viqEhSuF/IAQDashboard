@@ -151,7 +151,8 @@ sudo systemctl status sensor-api
 Check the API responds:
 ```bash
 curl http://localhost:8080/api/locations
-# Should return a JSON array of location objects
+# Returns [] until a station has posted, then one entry per station
+# An error message instead means the API can't reach the database
 ```
 
 ---
@@ -189,12 +190,38 @@ curl http://localhost/api/locations
 
 ## 6 — Build and deploy the frontend
 
+The build needs about 1.5 GB of memory. On a Pi with 1 GB it runs out and
+appears to hang partway through `transforming (…)`; build it on another
+computer instead (below). With 4 GB or more, build on the Pi:
+
 ```bash
 cd ~/IAQDashboard/sensor-dashboard
 bun install
 bun run deploy
 # This runs: vite build && sudo cp -r build/* /var/www/html/
 ```
+
+**Building on another computer** (any Linux, macOS or Windows machine with
+[Bun](https://bun.sh) installed). The built dashboard is plain files, so it
+runs on the Pi unchanged:
+
+```bash
+git clone -b v2 https://github.com/viqEhSuF/IAQDashboard.git
+cd IAQDashboard/sensor-dashboard
+bun install
+bun run build
+scp -r build pi-user@<pi-ip>:~/dashboard-build
+```
+
+Then on the Pi:
+
+```bash
+sudo cp -r ~/dashboard-build/* /var/www/html/
+rm -rf ~/dashboard-build
+```
+
+Copying the files doesn't remove `iaq_ingest.php`, which also lives in
+`/var/www/html/`.
 
 ---
 

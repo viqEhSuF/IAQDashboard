@@ -193,7 +193,7 @@
     try {
       const response = await fetch(getApiUrl('locations'));
       if (response.ok) {
-        availableLocations = await response.json();
+        availableLocations = (await response.json()) ?? [];
         if (selectedLocation === null && availableLocations.length > 0) {
           selectedLocation = availableLocations[0].location;
         }
@@ -214,7 +214,7 @@
       if (endDate)   url.searchParams.append('endDate',   `${endDate}T${endHour.toString().padStart(2, '0')}:59:59`);
       const response = await fetch(url);
       if (!response.ok) throw new Error(`HTTP error: ${response.status}`);
-      sensorData = await response.json();
+      sensorData = (await response.json()) ?? [];
       updateCharts();
       loading = false;
     } catch (err) {
@@ -273,7 +273,7 @@
   async function fetchStationHealth() {
     try {
       const response = await fetch(getApiUrl('station-health'));
-      if (response.ok) stationHealth = await response.json();
+      if (response.ok) stationHealth = (await response.json()) ?? [];
     } catch (err) {
       console.error('Error fetching station health:', err);
     }
@@ -383,7 +383,7 @@
           if (endDate)   url.searchParams.append('endDate',   `${endDate}T${endHour.toString().padStart(2, '0')}:59:59`);
           const res = await fetch(url);
           if (!res.ok) throw new Error(`HTTP ${res.status} for location ${loc}`);
-          return { loc, data: await res.json() as NormalizedSensorData[] };
+          return { loc, data: ((await res.json()) ?? []) as NormalizedSensorData[] };
         })
       );
       let colorIdx = 0;
@@ -637,7 +637,11 @@
     {:else if sensorData.length === 0}
       <div class="bg-amber-50 border border-amber-200 text-amber-700 p-5 rounded-xl">
         <p class="font-semibold">No data</p>
-        <p class="text-sm mt-1">No readings found for the selected filters.</p>
+        {#if availableLocations.length === 0}
+          <p class="text-sm mt-1">No stations have reported yet. Stations appear here after their first report.</p>
+        {:else}
+          <p class="text-sm mt-1">No readings found for the selected filters.</p>
+        {/if}
       </div>
     {:else}
 

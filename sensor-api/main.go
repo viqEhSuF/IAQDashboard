@@ -203,7 +203,8 @@ func handleDeleteLocationName(w http.ResponseWriter, r *http.Request) {
 
 // GetLocations returns the active stations
 func GetLocations() ([]LocationData, error) {
-	var locations []LocationData
+	// Start from an empty list so no stations encodes as [] rather than null
+	locations := []LocationData{}
 	err := db.Select(&locations,
 		"SELECT CAST(station_id AS CHAR) AS location FROM stations WHERE active = 1 ORDER BY station_id")
 	if err != nil {
@@ -245,8 +246,9 @@ func GetSensorData(limit int, startDate, endDate string, location int) ([]Sensor
 	query += " ORDER BY measured_at DESC LIMIT ?"
 	args = append(args, limit)
 
-	// Execute the query
-	var data []SensorData
+	// Execute the query. Start from an empty list so no rows encodes as []
+	// rather than null.
+	data := []SensorData{}
 	err := db.Select(&data, query, args...)
 	if err != nil {
 		return nil, err
