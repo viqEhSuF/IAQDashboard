@@ -156,16 +156,66 @@
     maxValue: dpChart.length ? Math.max(...dpChart.map(d => d.y).filter(v => !isNaN(v))) + 5 : 70,
   };
   
+  // ── Time range and live refresh ────────────────────────────────────────
+
+  // Stations report every 2 minutes, so the page refreshes on the same cycle
+  const REFRESH_MS = 120000;
+
+  // Hours back from now for a preset button ("Last 6 Hours" = 6). A preset
+  // range moves forward with each refresh. null = a range picked by hand.
+  let presetHours: number | null = 24;
+  let lastUpdated: Date | null = null;
+  let refreshFailed = false;
+  let lastRefresh = 0;
+  let fetchSeq = 0;
+
+  // YYYY-MM-DD in the browser's local time (toISOString gives the UTC date,
+  // which is already tomorrow in the evening in US time zones)
+  function localDate(d: Date): string {
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${d.getFullYear()}-${m}-${day}`;
+  }
+
+  // Sets the range to the last `hours` hours, to the hour
+  function applyPreset(hours: number) {
+    const now = new Date();
+    const start = new Date(now.getTime() - hours * 3600 * 1000);
+    startDate = localDate(start);
+    startHour = start.getHours();
+    endDate = localDate(now);
+    endHour = now.getHours();
+  }
+
+  function selectPreset(hours: number) {
+    presetHours = hours;
+    applyPreset(hours);
+    fetchData();
+  }
+
+  // True while new readings can still fall inside the range
+  function isLive(preset: number | null, end: string, hour: number, _updated: Date | null): boolean {
+    if (preset !== null || !end) return true;
+    return new Date(`${end}T${hour.toString().padStart(2, '0')}:59:59`).getTime() >= Date.now();
+  }
+  $: rangeLive = isLive(presetHours, endDate, endHour, lastUpdated);
+
+  // Runs every 2 minutes, and when a hidden tab comes back into view.
+  // Updates the charts in place, without the loading spinner.
+  function refresh() {
+    if (document.hidden) return;
+    lastRefresh = Date.now();
+    fetchStationHealth();
+    fetchLocations();
+    if (loading || !isLive(presetHours, endDate, endHour, null)) return;
+    if (presetHours !== null) applyPreset(presetHours);
+    fetchData(true);
+  }
+
   // Set default date range to last 24 hours
   function setDefaultDateRange() {
-    const now = new Date();
-    const yesterday = new Date(now);
-    yesterday.setDate(now.getDate() - 1);
-    
-    endDate = now.toISOString().split('T')[0];
-    startDate = yesterday.toISOString().split('T')[0];
-    startHour = 0;
-    endHour = 23;
+    presetHours = 24;
+    applyPreset(24);
   }
   
   // Format hour for display
@@ -203,10 +253,14 @@
     }
   }
 
-  // Fetch data with the current date range and selected location
-  async function fetchData() {
-    loading = true;
-    error = null;
+  // Fetch data with the current date range and selected location.
+  // quiet = a background refresh: no spinner, and the charts stay up if it fails.
+  async function fetchData(quiet = false) {
+    const seq = ++fetchSeq;
+    if (!quiet) {
+      loading = true;
+      error = null;
+    }
     try {
       const url = new URL(getApiUrl('sensor-data'), window.location.origin);
       if (selectedLocation !== null) url.searchParams.append('location', selectedLocation);
@@ -214,23 +268,35 @@
       if (endDate)   url.searchParams.append('endDate',   `${endDate}T${endHour.toString().padStart(2, '0')}:59:59`);
       const response = await fetch(url);
       if (!response.ok) throw new Error(`HTTP error: ${response.status}`);
-      sensorData = (await response.json()) ?? [];
+      const data = (await response.json()) ?? [];
+      if (seq !== fetchSeq) return;  // a newer request replaced this one
+      sensorData = data;
       updateCharts();
-      loading = false;
+      error = null;
+      refreshFailed = false;
+      lastUpdated = new Date();
     } catch (err) {
+      if (seq !== fetchSeq) return;
       console.error('Error fetching data:', err);
-      error = err instanceof Error ? err.message : 'Unknown error';
-      loading = false;
+      if (quiet && sensorData.length > 0) {
+        refreshFailed = true;  // keep showing the last data; the next refresh retries
+      } else {
+        error = err instanceof Error ? err.message : 'Unknown error';
+      }
+    } finally {
+      if (seq === fetchSeq) loading = false;
     }
   }
-  
-  // Handle date input changes
+
+  // Handle date input changes: a range picked by hand stays where it is
   function handleDateChange() {
+    presetHours = null;
     fetchData();
   }
-  
+
   // Reset date filters and fetch all data
   function resetDateFilters() {
+    presetHours = null;
     startDate = '';
     endDate = '';
     startHour = 0;
@@ -428,11 +494,21 @@
       .catch(() => {});
     // fetchLocations must finish before fetchData so selectedLocation is set
     // to the first location.
-    fetchLocations().then(fetchData);
-    // Station health refreshes on each 2-minute report cycle
+    fetchLocations().then(() => fetchData());
     fetchStationHealth();
-    const healthTimer = setInterval(fetchStationHealth, 120000);
-    return () => clearInterval(healthTimer);
+    lastRefresh = Date.now();
+
+    // Live refresh. Browsers slow timers in hidden tabs, so also refresh
+    // right away when the tab comes back into view after a missed cycle.
+    const timer = setInterval(refresh, REFRESH_MS);
+    const onVisible = () => {
+      if (!document.hidden && Date.now() - lastRefresh >= REFRESH_MS) refresh();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
   });
 </script>
 
@@ -578,45 +654,23 @@
           class="px-3 py-1.5 rounded-lg text-sm font-medium bg-gray-100 text-gray-600 hover:bg-gray-200 transition-colors">
           Reset
         </button>
-        <button on:click={() => {
-            const now = new Date();
-            const then = new Date(now); then.setDate(now.getDate() - 30);
-            endDate = now.toISOString().split('T')[0]; endHour = now.getHours();
-            startDate = then.toISOString().split('T')[0]; startHour = now.getHours();
-            handleDateChange();
-          }}
+        <button on:click={() => selectPreset(30 * 24)}
           class="px-3 py-1.5 rounded-lg text-sm font-medium bg-slate-700 text-white hover:bg-slate-800 transition-colors">
           Last Month
         </button>
-        <button on:click={() => {
-            const now = new Date();
-            const then = new Date(now); then.setDate(now.getDate() - 7);
-            endDate = now.toISOString().split('T')[0]; endHour = now.getHours();
-            startDate = then.toISOString().split('T')[0]; startHour = now.getHours();
-            handleDateChange();
-          }}
+        <button on:click={() => selectPreset(7 * 24)}
           class="px-3 py-1.5 rounded-lg text-sm font-medium bg-slate-700 text-white hover:bg-slate-800 transition-colors">
           Last Week
         </button>
-        <button on:click={() => { setDefaultDateRange(); handleDateChange(); }}
+        <button on:click={() => selectPreset(24)}
           class="px-3 py-1.5 rounded-lg text-sm font-medium bg-slate-600 text-white hover:bg-slate-700 transition-colors">
           Last 24 Hours
         </button>
-        <button on:click={() => {
-            const now = new Date();
-            endDate = now.toISOString().split('T')[0]; endHour = now.getHours();
-            startDate = endDate; startHour = Math.max(0, endHour - 6);
-            handleDateChange();
-          }}
+        <button on:click={() => selectPreset(6)}
           class="px-3 py-1.5 rounded-lg text-sm font-medium bg-slate-600 text-white hover:bg-slate-700 transition-colors">
           Last 6 Hours
         </button>
-        <button on:click={() => {
-            const now = new Date();
-            endDate = now.toISOString().split('T')[0]; endHour = now.getHours();
-            startDate = endDate; startHour = Math.max(0, endHour - 1);
-            handleDateChange();
-          }}
+        <button on:click={() => selectPreset(1)}
           class="px-3 py-1.5 rounded-lg text-sm font-medium bg-slate-500 text-white hover:bg-slate-600 transition-colors">
           Last Hour
         </button>
@@ -650,6 +704,16 @@
         Showing <span class="font-medium text-gray-600">{sensorData.length.toLocaleString()}</span> readings
         · <span class="font-medium text-gray-600">{new Date(sensorData[sensorData.length - 1].recTime).toLocaleString()}</span>
         → <span class="font-medium text-gray-600">{new Date(sensorData[0].recTime).toLocaleString()}</span>
+        {#if lastUpdated}
+          ·
+          {#if refreshFailed}
+            <span class="text-amber-600">Couldn't update; showing data from {lastUpdated.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</span>
+          {:else if rangeLive}
+            <span>Updated {lastUpdated.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}, refreshes every 2 min</span>
+          {:else}
+            <span>Fixed range, not refreshing</span>
+          {/if}
+        {/if}
       </p>
 
       <!-- Chart cards -->
