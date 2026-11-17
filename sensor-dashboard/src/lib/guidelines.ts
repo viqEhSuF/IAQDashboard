@@ -12,7 +12,7 @@ export type Guideline = { value: number; label: string; color: string };
 const WARNING = '#b45309';   // dark amber
 const VERY_HIGH = '#b91c1c'; // dark red
 
-export const GUIDELINES: Record<'co2' | 'pm25' | 'hcho', Guideline[]> = {
+export const GUIDELINES: Record<'co2' | 'pm25' | 'pm10' | 'hcho', Guideline[]> = {
   // CO2, German Environment Agency (UBA) indoor guide values (2008):
   // below 1000 ppm hygienically unobjectionable; 1000-2000 ppm conspicuous,
   // increase ventilation; above 2000 ppm unacceptable.
@@ -28,6 +28,15 @@ export const GUIDELINES: Record<'co2' | 'pm25' | 'hcho', Guideline[]> = {
   pm25: [
     { value: 15, label: 'Warning', color: WARNING },
     { value: 35, label: 'Very high', color: VERY_HIGH }
+  ],
+
+  // PM10, 24-hour averages: WHO 2021 air quality guideline 45 ug/m3, and the
+  // US EPA 24-hour standard of 150 ug/m3. The SEN55 calculates PM10 (and PM4)
+  // from the particles it measures rather than measuring them directly.
+  // PM1.0 and PM4.0 have no established guideline values.
+  pm10: [
+    { value: 45, label: 'Warning', color: WARNING },
+    { value: 150, label: 'Very high', color: VERY_HIGH }
   ],
 
   // Formaldehyde, Health Canada residential indoor air quality guideline:

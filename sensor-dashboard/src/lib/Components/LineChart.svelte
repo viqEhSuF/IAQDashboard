@@ -118,7 +118,7 @@
         },
         ...yAxisOptions
       };
-    } else if (label.includes('PM2.5')) {
+    } else if (label.startsWith('PM')) {
       yAxisOptions = {
         ...{
           minValue: 0,
@@ -197,7 +197,7 @@
     if (label.includes('NOx Index'))    return v;
     if (label.includes('HCHO'))         return `${v} ppb`;
     if (label.includes('Dew Point'))    return `${v}°F`;
-    if (label.includes('PM2.5'))        return `${v} μg/m³`;
+    if (label.startsWith('PM'))         return `${v} μg/m³`;
     return v;
   }
 

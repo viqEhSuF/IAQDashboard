@@ -19,7 +19,6 @@
   let co2Chart: DataRecord[] = [];
   let humidityChart: DataRecord[] = [];
   let vocChart: DataRecord[] = [];
-  let pmassChart: DataRecord[] = [];
   let noxChart: DataRecord[] = [];
   let hchoChart: DataRecord[] = [];
   let dpChart: DataRecord[] = [];
@@ -315,7 +314,6 @@
     co2Chart = createTimeSeriesData(sensorData, 'CO2');
     humidityChart = createTimeSeriesData(sensorData, 'rH');
     vocChart = createTimeSeriesData(sensorData, 'VOC');
-    pmassChart = createTimeSeriesData(sensorData, 'pmass25');
     noxChart = createTimeSeriesData(sensorData, 'NOx');
     hchoChart = createTimeSeriesData(sensorData, 'HCHO');
     dpChart = createTimeSeriesData(sensorData, 'indoorTd');
@@ -365,6 +363,23 @@
   $: humidityShown = inZoom(humidityChart, zoomRange);
   $: vocShown      = inZoom(vocChart, zoomRange);
   $: pmassShown    = inZoom(pmassChart, zoomRange);
+
+  // ── Particle size on the PM chart ──────────────────────────────────────
+
+  type PmField = 'pmass1' | 'pmass25' | 'pmass4' | 'pmass10';
+  const PM_SIZES: { field: PmField; label: string; guidelines: typeof GUIDELINES.pm25; note: string }[] = [
+    { field: 'pmass1', label: 'PM1.0', guidelines: [],
+      note: 'Particles up to 1 μm. There are no established guideline values for PM1.0, so no lines are drawn.' },
+    { field: 'pmass25', label: 'PM2.5', guidelines: GUIDELINES.pm25,
+      note: 'Warning above 15 μg/m³ (WHO guideline) and very high above 35 μg/m³ (US EPA standard), both averaged over 24 hours. Short peaks from cooking or cleaning are normal.' },
+    { field: 'pmass4', label: 'PM4.0', guidelines: [],
+      note: 'Particles up to 4 μm. There are no established guideline values for PM4.0, so no lines are drawn. The SEN55 calculates PM4.0 from the smaller particles it measures, so it is an estimate.' },
+    { field: 'pmass10', label: 'PM10', guidelines: GUIDELINES.pm10,
+      note: 'Warning above 45 μg/m³ (WHO guideline) and very high above 150 μg/m³ (US EPA standard), both averaged over 24 hours. The SEN55 calculates PM10 from the smaller particles it measures, so it is an estimate, less precise than PM2.5 (±25 μg/m³ below 100 μg/m³).' }
+  ];
+  let pmField: PmField = 'pmass25';
+  $: pmSize = PM_SIZES.find(s => s.field === pmField) ?? PM_SIZES[1];
+  $: pmassChart = createTimeSeriesData(sensorData, pmField);
   $: noxShown      = inZoom(noxChart, zoomRange);
   $: hchoShown     = inZoom(hchoChart, zoomRange);
   $: dpShown       = inZoom(dpChart, zoomRange);
@@ -842,12 +857,23 @@
 
         <section class="chart-card" style="border-left-color: #f59e0b">
           <div class="card-header">
-            <h2 class="card-title">Particulate Matter (PM2.5)</h2>
-            <p class="card-note">Warning above 15 μg/m³ (WHO guideline) and very high above 35 μg/m³ (US EPA standard), both averaged over 24 hours. Short peaks from cooking or cleaning are normal.</p>
+            <div class="flex items-center justify-between gap-3">
+              <h2 class="card-title">Particulate Matter ({pmSize.label})</h2>
+              <label class="flex items-center gap-2 text-sm text-gray-400">
+                Particle size
+                <select bind:value={pmField}
+                  class="border border-gray-200 rounded-lg px-2 py-1 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-slate-400">
+                  {#each PM_SIZES as size}
+                    <option value={size.field}>{size.label}</option>
+                  {/each}
+                </select>
+              </label>
+            </div>
+            <p class="card-note">{pmSize.note}</p>
           </div>
           <LineChart data={pmassShown} onZoom={zoomTo} zoomed={zoomRange !== null} onResetZoom={resetZoom}
-            label="PM2.5 (μg/m³)" color="#f59e0b"
-            thresholds={GUIDELINES.pm25} unit="μg/m³" decimals={1}
+            label="{pmSize.label} (μg/m³)" color="#f59e0b"
+            thresholds={pmSize.guidelines} unit="μg/m³" decimals={1}
             yAxisOptions={pmAxisOptions} xAxisOptions={xAxisOptions} />
         </section>
 
