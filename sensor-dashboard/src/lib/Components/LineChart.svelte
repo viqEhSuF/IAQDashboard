@@ -177,6 +177,10 @@
         <p class="text-gray-500">No data available</p>
       </div>
     {:else}
+      <!-- Rebuild the chart when its data changes: the Unovis Svelte container
+           stores new data without redrawing (setData(data, true)), so a live
+           refresh would otherwise keep showing the old line. -->
+      {#key data}
       <VisXYContainer {data} height={height}>
         <VisLine 
           {x} 
@@ -222,6 +226,7 @@
         <VisCrosshair {x} {y} color={color} template={crosshairTemplate} />
         <VisTooltip />
       </VisXYContainer>
+      {/key}
     {/if}
   </div>
   
