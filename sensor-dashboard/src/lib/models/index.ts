@@ -60,4 +60,9 @@ export interface StationHealth {
   rhtError: boolean;
   gasSensorError: boolean;
   fanSpeedWarning: boolean;
+  // true when the last report had no readings from that sensor; null if the
+  // station has never reported
+  sen55NoData: boolean | null;
+  co2NoData: boolean | null;
+  hchoNoData: boolean | null;
 }

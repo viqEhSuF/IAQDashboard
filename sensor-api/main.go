@@ -58,6 +58,11 @@ type StationHealth struct {
 	RHTError         bool       `json:"rhtError" db:"rht_error"`
 	GasSensorError   bool       `json:"gasSensorError" db:"gas_sensor_error"`
 	FanSpeedWarning  bool       `json:"fanSpeedWarning" db:"fan_speed_warning"`
+
+	// Whether the last report had no readings from each sensor (null = never reported)
+	Sen55NoData *bool `json:"sen55NoData" db:"sen55_no_data"`
+	CO2NoData   *bool `json:"co2NoData" db:"co2_no_data"`
+	HCHONoData  *bool `json:"hchoNoData" db:"hcho_no_data"`
 }
 
 // Database configuration - same as in your TypeScript app
@@ -269,6 +274,7 @@ func GetStationHealth() ([]StationHealth, error) {
 	err := db.Select(&rows, `
 		SELECT CAST(station_id AS CHAR) AS location, name, firmware, last_reading,
 		       minutes_since_last, rssi_dbm, uptime_s,
+		       sen55_no_data, co2_no_data, hcho_no_data,
 		       COALESCE(fan_error_24h, 0)         AS fan_error,
 		       COALESCE(laser_error_24h, 0)       AS laser_error,
 		       COALESCE(rht_error_24h, 0)         AS rht_error,

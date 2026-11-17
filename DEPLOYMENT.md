@@ -317,6 +317,24 @@ cat /var/log/iaq-update.log
 
 ---
 
+## Database updates
+
+Changes to the database's views come as files in `database/updates/`, named by
+date. The daily auto-update does not apply them. After pulling, run any files
+newer than the system's installation, oldest first:
+
+```bash
+cd ~/IAQDashboard && git pull
+ls database/updates/
+sudo mariadb buildingData < database/updates/<file>.sql
+```
+
+They change only the views the dashboard reads, never stored readings, and are
+safe to run more than once. A system installed from the current
+`database/iaq_schema.sql` already includes every update up to that point.
+
+---
+
 ## Updating after a code change
 
 ```bash

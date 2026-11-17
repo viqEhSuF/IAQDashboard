@@ -4,6 +4,7 @@
   import MultiLineChart from '$lib/Components/MultiLineChart.svelte';
   import type { NormalizedSensorData, LocationData, StationHealth } from '$lib/models';
   import { getApiUrl } from '$lib/config';
+  import { GUIDELINES } from '$lib/guidelines';
   
   // Define data record type that matches the LineChart component
   type DataRecord = {
@@ -345,45 +346,72 @@
     }
   }
 
-  function stationFaults(s: StationHealth): string[] {
-    const faults: string[] = [];
-    if (s.fanError) faults.push('Fan stopped');
-    if (s.laserError) faults.push('PM laser fault');
-    if (s.rhtError) faults.push('Temp/RH sensor fault');
-    if (s.gasSensorError) faults.push('VOC/NOx sensor fault');
-    return faults;
+  type Level = 'ok' | 'warning' | 'fault' | 'unknown';
+  type HealthRow = { label: string; level: Level; text: string };
+
+  function lastSeen(m: number): string {
+    if (m < 1) return 'Just now';
+    if (m < 60) return `${m} min ago`;
+    if (m < 48 * 60) return `${Math.round(m / 60)} h ago`;
+    return `${Math.round(m / 1440)} days ago`;
   }
 
-  function stationWarnings(s: StationHealth): string[] {
-    const warnings: string[] = [];
-    if (s.fanSpeedWarning) warnings.push('Fan speed out of range');
-    if (s.rssi !== null && s.rssi < WEAK_RSSI_DBM) warnings.push('Weak WiFi signal');
-    return warnings;
+  function isOffline(s: StationHealth): boolean {
+    return s.minutesSinceLast === null || s.minutesSinceLast > OFFLINE_MINUTES;
   }
 
-  function stationState(s: StationHealth): 'offline' | 'fault' | 'warning' | 'ok' {
-    if (s.minutesSinceLast === null || s.minutesSinceLast > OFFLINE_MINUTES) return 'offline';
-    if (stationFaults(s).length) return 'fault';
-    if (stationWarnings(s).length) return 'warning';
-    return 'ok';
+  // One row per part of the station, each with its own status, so a weak
+  // WiFi signal is never mistaken for a sensor fault. SEN55 fault flags cover
+  // the last 24 hours; the other rows reflect the latest report.
+  function healthRows(s: StationHealth): HealthRow[] {
+    if (s.minutesSinceLast === null) {
+      return [{ label: 'Reporting', level: 'unknown', text: 'No reports yet' }];
+    }
+    const offline = isOffline(s);
+    const rows: HealthRow[] = [{
+      label: 'Reporting',
+      level: offline ? 'fault' : 'ok',
+      text: offline ? `Offline, last report ${lastSeen(s.minutesSinceLast)}` : lastSeen(s.minutesSinceLast)
+    }];
+
+    rows.push(s.rssi === null
+      ? { label: 'WiFi', level: 'unknown', text: 'No signal reading' }
+      : s.rssi < WEAK_RSSI_DBM
+        ? { label: 'WiFi', level: 'warning', text: `${s.rssi} dBm, weak` }
+        : { label: 'WiFi', level: 'ok', text: `${s.rssi} dBm` });
+
+    const sen55Faults: string[] = [];
+    if (s.fanError) sen55Faults.push('Fan stopped');
+    if (s.laserError) sen55Faults.push('PM laser fault');
+    if (s.rhtError) sen55Faults.push('Temp/RH sensor fault');
+    if (s.gasSensorError) sen55Faults.push('VOC/NOx sensor fault');
+    rows.push(s.sen55NoData
+      ? { label: 'SEN55', level: 'fault', text: 'No readings' }
+      : sen55Faults.length
+        ? { label: 'SEN55', level: 'fault', text: `${sen55Faults.join(', ')} (last 24 h)` }
+        : s.fanSpeedWarning
+          ? { label: 'SEN55', level: 'warning', text: 'Fan speed out of range (last 24 h)' }
+          : { label: 'SEN55', level: 'ok', text: 'OK' });
+
+    rows.push(s.co2NoData
+      ? { label: 'CO₂ (SCD40)', level: 'fault', text: 'No readings' }
+      : { label: 'CO₂ (SCD40)', level: 'ok', text: 'OK' });
+    rows.push(s.hchoNoData
+      ? { label: 'HCHO (SFA30)', level: 'fault', text: 'No readings' }
+      : { label: 'HCHO (SFA30)', level: 'ok', text: 'OK' });
+
+    // While a station is offline its other statuses are from its last report
+    if (offline) rows.slice(1).forEach(r => (r.level = 'unknown'));
+    return rows;
   }
 
-  function lastSeen(s: StationHealth): string {
-    if (s.minutesSinceLast === null) return 'No reports yet';
-    const m = s.minutesSinceLast;
-    if (m < 1) return 'Reported just now';
-    if (m < 60) return `Reported ${m} min ago`;
-    if (m < 48 * 60) return `Reported ${Math.round(m / 60)} h ago`;
-    return `Reported ${Math.round(m / 1440)} days ago`;
-  }
-
-  const STATE_STYLE = {
-    ok:      { dot: 'bg-emerald-500', text: 'OK' },
-    warning: { dot: 'bg-amber-400',   text: 'Warning' },
-    fault:   { dot: 'bg-red-500',     text: 'Fault' },
-    offline: { dot: 'bg-gray-400',    text: 'Offline' }
+  const LEVEL_STYLE: Record<Level, { dot: string; text: string }> = {
+    ok:      { dot: 'bg-emerald-500', text: 'text-gray-600' },
+    warning: { dot: 'bg-amber-400',   text: 'text-amber-700' },
+    fault:   { dot: 'bg-red-500',     text: 'text-red-600' },
+    unknown: { dot: 'bg-gray-300',    text: 'text-gray-400' }
   };
-  
+
   // ── Overlay chart ───────────────────────────────────────────────────────
 
   const OVERLAY_COLORS = [
@@ -392,21 +420,22 @@
     '#84cc16', '#14b8a6', '#a78bfa', '#fb923c'
   ];
 
-  const OVERLAY_METRICS: { label: string; field: keyof NormalizedSensorData }[] = [
-    { label: 'Temperature', field: 'temp'     },
-    { label: 'CO₂',         field: 'CO2'      },
-    { label: 'Humidity',    field: 'rH'       },
-    { label: 'VOC Index',   field: 'VOC'      },
-    { label: 'PM2.5',       field: 'pmass25'  },
-    { label: 'NOx Index',   field: 'NOx'      },
-    { label: 'HCHO',        field: 'HCHO'     },
-    { label: 'Dew Point',   field: 'indoorTd' },
+  // decimals = decimal places shown in tooltips (only PM and HCHO need any)
+  const OVERLAY_METRICS: { label: string; field: keyof NormalizedSensorData; decimals: number }[] = [
+    { label: 'Temperature', field: 'temp',     decimals: 0 },
+    { label: 'CO₂',         field: 'CO2',      decimals: 0 },
+    { label: 'Humidity',    field: 'rH',       decimals: 0 },
+    { label: 'VOC Index',   field: 'VOC',      decimals: 0 },
+    { label: 'PM2.5',       field: 'pmass25',  decimals: 1 },
+    { label: 'NOx Index',   field: 'NOx',      decimals: 0 },
+    { label: 'HCHO',        field: 'HCHO',     decimals: 1 },
+    { label: 'Dew Point',   field: 'indoorTd', decimals: 0 },
   ];
 
   let overlayLocations: string[] = [];
   let overlayMetrics: (keyof NormalizedSensorData)[] = [];
   let overlayMetricsRight: (keyof NormalizedSensorData)[] = [];
-  let overlaySeries: { data: { x: number; y: number }[]; color: string; label: string; axis?: 'left' | 'right' }[] = [];
+  let overlaySeries: { data: { x: number; y: number }[]; color: string; label: string; axis?: 'left' | 'right'; decimals?: number }[] = [];
   let overlayLoading = false;
   let overlayError: string | null = null;
 
@@ -461,7 +490,8 @@
             data: createTimeSeriesData(data, field),
             color: OVERLAY_COLORS[colorIdx % OVERLAY_COLORS.length],
             label: overlayLabel(loc, metricDef.label),
-            axis: 'left'
+            axis: 'left',
+            decimals: metricDef.decimals
           });
           colorIdx++;
         }
@@ -471,7 +501,8 @@
             data: createTimeSeriesData(data, field),
             color: OVERLAY_COLORS[colorIdx % OVERLAY_COLORS.length],
             label: overlayLabel(loc, metricDef.label),
-            axis: 'right'
+            axis: 'right',
+            decimals: metricDef.decimals
           });
           colorIdx++;
         }
@@ -581,24 +612,22 @@
         <h2 class="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Station Health</h2>
         <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           {#each stationHealth as s (s.location)}
-            {@const state = stationState(s)}
-            {@const issues = [...stationFaults(s), ...(s.fanSpeedWarning ? ['Fan speed out of range'] : [])]}
-            {@const weak = s.rssi !== null && s.rssi < WEAK_RSSI_DBM}
             <div class="rounded-lg border border-gray-100 p-3">
-              <div class="flex items-center justify-between gap-2">
+              <div class="flex items-baseline justify-between gap-2">
                 <span class="font-medium text-gray-700 truncate">{locationLabel(s.location)}</span>
-                <span class="flex items-center gap-1.5 text-xs font-medium text-gray-500 shrink-0">
-                  <span class="w-2 h-2 rounded-full {STATE_STYLE[state].dot}"></span>
-                  {STATE_STYLE[state].text}
-                </span>
+                {#if s.firmware}<span class="text-xs text-gray-400 shrink-0">{s.firmware}</span>{/if}
               </div>
-              <div class="text-xs text-gray-400 mt-1">
-                {lastSeen(s)}{#if s.rssi !== null} · <span class={weak ? 'text-amber-600' : ''}>{s.rssi} dBm{weak ? ' (weak)' : ''}</span>{/if}{#if s.firmware} · {s.firmware}{/if}
-              </div>
-              {#if issues.length > 0}
-                <div class="text-xs mt-1 {state === 'fault' ? 'text-red-600' : 'text-amber-600'}">
-                  {issues.join(' · ')} <span class="text-gray-400">(last 24 h)</span>
-                </div>
+              <dl class="mt-2 space-y-1 text-xs">
+                {#each healthRows(s) as row (row.label)}
+                  <div class="flex items-center gap-2">
+                    <span class="w-2 h-2 rounded-full shrink-0 {LEVEL_STYLE[row.level].dot}"></span>
+                    <dt class="text-gray-500 w-24 shrink-0">{row.label}</dt>
+                    <dd class="{LEVEL_STYLE[row.level].text} min-w-0">{row.text}</dd>
+                  </div>
+                {/each}
+              </dl>
+              {#if isOffline(s) && s.minutesSinceLast !== null}
+                <p class="text-xs text-gray-400 mt-2">Sensor statuses are from the last report.</p>
               {/if}
             </div>
           {/each}
@@ -730,8 +759,10 @@
         <section class="chart-card" style="border-left-color: #10b981">
           <div class="card-header">
             <h2 class="card-title">CO₂</h2>
+            <p class="card-note">Warning from 1,000 ppm, when ventilation should be increased; very high above 2,000 ppm (German Environment Agency indoor guide values). Health Canada's limit for homes is also 1,000 ppm, averaged over 24 hours.</p>
           </div>
           <LineChart data={co2Chart} label="CO2 (ppm)" color="#10b981"
+            thresholds={GUIDELINES.co2} unit="ppm"
             yAxisOptions={co2AxisOptions} xAxisOptions={xAxisOptions} />
         </section>
 
@@ -755,8 +786,10 @@
         <section class="chart-card" style="border-left-color: #f59e0b">
           <div class="card-header">
             <h2 class="card-title">Particulate Matter (PM2.5)</h2>
+            <p class="card-note">Warning above 15 μg/m³ (WHO guideline) and very high above 35 μg/m³ (US EPA standard), both averaged over 24 hours. Short peaks from cooking or cleaning are normal.</p>
           </div>
           <LineChart data={pmassChart} label="PM2.5 (μg/m³)" color="#f59e0b"
+            thresholds={GUIDELINES.pm25} unit="μg/m³" decimals={1}
             yAxisOptions={pmAxisOptions} xAxisOptions={xAxisOptions} />
         </section>
 
@@ -772,8 +805,10 @@
         <section class="chart-card" style="border-left-color: #06b6d4">
           <div class="card-header">
             <h2 class="card-title">Formaldehyde (HCHO)</h2>
+            <p class="card-note">Warning above 40 ppb averaged over 8 hours, very high above 100 ppb averaged over 1 hour (Health Canada residential guideline).</p>
           </div>
           <LineChart data={hchoChart} label="HCHO (ppb)" color="#06b6d4"
+            thresholds={GUIDELINES.hcho} unit="ppb" decimals={1}
             yAxisOptions={hchoAxisOptions} xAxisOptions={xAxisOptions} />
         </section>
 

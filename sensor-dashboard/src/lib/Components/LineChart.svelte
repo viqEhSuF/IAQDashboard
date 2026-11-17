@@ -20,12 +20,33 @@
     tickTextFontSize?: string;
   };
   
+  // A guideline drawn as a dashed horizontal line, e.g. "Elevated" at 1000 ppm
+  type Threshold = {
+    value: number;
+    label: string;
+    color: string;
+  };
+
   // Accept data as a prop
   export let data: DataRecord[] = [];
   export let height: number = 300;
   export let label: string = '';
   export let color: string = '#1d4ed8';
   export let showLegend: boolean = true;
+  // Decimal places in the hover tooltip
+  export let decimals: number = 0;
+  // Guideline lines, lowest first. The first is always drawn; each further one
+  // is drawn once readings reach the one below it, so a chart of normal
+  // readings isn't squeezed down to make room for a level far above them.
+  export let thresholds: Threshold[] = [];
+  export let unit: string = '';
+
+  $: dataMax = data.length ? Math.max(...data.map(d => d.y)) : 0;
+  $: shownThresholds = thresholds.filter((t, i) => i === 0 || dataMax >= thresholds[i - 1].value);
+  // Charts with guidelines start at zero and leave room above the top line
+  $: yDomain = thresholds.length
+    ? [0, Math.max(dataMax, ...shownThresholds.map(t => t.value)) * 1.08] as [number, number]
+    : undefined;
   
   // Axis configuration
   export let yAxisOptions: AxisOptions = {};
@@ -149,7 +170,7 @@
   
   // Format a raw y value with the correct unit for this chart
   function formatValue(y: number): string {
-    const v = y.toFixed(2);
+    const v = y.toFixed(decimals);
     if (label.includes('Temperature'))  return `${v}°F`;
     if (label.includes('CO2'))          return `${v} ppm`;
     if (label.includes('Humidity'))     return `${v}%`;
@@ -161,13 +182,25 @@
     return v;
   }
 
+  // The highest guideline a reading is at or above, if any
+  function levelOf(y: number): Threshold | undefined {
+    return [...thresholds].reverse().find(t => y >= t.value);
+  }
+
   // Crosshair tooltip template — called with the snapped data point
-  $: crosshairTemplate = (d: DataRecord) => `
+  $: crosshairTemplate = (d: DataRecord) => {
+    const level = levelOf(d.y);
+    const levelLine = level
+      ? `<div style="margin-top:2px;color:${level.color};font-weight:600;">${level.label} (${level.value.toLocaleString()}${unit ? ' ' + unit : ''} or more)</div>`
+      : '';
+    return `
     <div style="padding:8px;font-family:sans-serif;min-width:160px;">
       <div style="font-weight:600;margin-bottom:4px;">${new Date(d.x).toLocaleString()}</div>
       <div>${label}: <strong>${formatValue(d.y)}</strong></div>
+      ${levelLine}
     </div>
   `;
+  };
 </script>
 
 <div class="chart-container">
@@ -181,9 +214,13 @@
            stores new data without redrawing (setData(data, true)), so a live
            refresh would otherwise keep showing the old line. -->
       {#key data}
-      <VisXYContainer {data} height={height}>
-        <VisLine 
-          {x} 
+      <VisXYContainer {data} height={height} {yDomain}>
+        <!-- Guideline lines first, so the readings draw on top of them -->
+        {#each shownThresholds as t (t.value)}
+          <VisLine {x} y={() => t.value} color={t.color} lineWidth={1.5} lineDashArray={[6, 4]} />
+        {/each}
+        <VisLine
+          {x}
           {y} 
           curveType="monotoneX"
           lineWidth={2}
@@ -219,7 +256,9 @@
           type="y"
           numTicks={yAxisOptions.numTicks}
           gridLine={yAxisOptions.gridLine}
-          tickFormat={yAxisOptions.tickFormat}
+          tickFormat={(d: number) =>
+            decimals === 0 && !Number.isInteger(d) ? ''  // whole-number charts label whole ticks only
+              : (yAxisOptions.tickFormat ? yAxisOptions.tickFormat(d) : `${d}`)}
           tickTextColor={yAxisOptions.tickTextColor}
           tickTextFontSize={yAxisOptions.tickTextFontSize}
         />
@@ -236,6 +275,12 @@
         <span class="legend-color" style="background-color: {color}"></span>
         <span class="legend-name">{label}</span>
       </div>
+      {#each shownThresholds as t (t.value)}
+        <div class="legend-item">
+          <span class="legend-dash" style="border-top-color: {t.color}"></span>
+          <span class="legend-name">{t.label} {t.value.toLocaleString()}{unit ? ` ${unit}` : ''}</span>
+        </div>
+      {/each}
     </div>
   {/if}
 </div>
@@ -247,6 +292,7 @@
   
   .legend-container {
     display: flex;
+    flex-wrap: wrap;
     justify-content: center;
     margin-top: 8px;
   }
@@ -254,7 +300,7 @@
   .legend-item {
     display: flex;
     align-items: center;
-    margin: 0 8px;
+    margin: 2px 8px;
   }
   
   .legend-color {
@@ -265,6 +311,13 @@
     margin-right: 4px;
   }
   
+  .legend-dash {
+    display: inline-block;
+    width: 18px;
+    border-top: 2px dashed;
+    margin-right: 4px;
+  }
+
   .legend-name {
     font-size: 0.875rem;
     color: #4b5563;

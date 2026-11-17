@@ -8,6 +8,7 @@
     color: string;
     label: string;
     axis?: 'left' | 'right';
+    decimals?: number;  // decimal places in the tooltip (default 0)
   };
 
   export let series: SeriesConfig[] = [];
@@ -95,7 +96,7 @@
       if (isNaN(val) || val === undefined) return '';
       return `<div style="display:flex;align-items:center;gap:6px;margin-top:3px">
         <span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${s.color};flex-shrink:0"></span>
-        <span style="font-size:0.8125rem;color:#374151">${s.label}: <strong>${val.toFixed(2)}</strong></span>
+        <span style="font-size:0.8125rem;color:#374151">${s.label}: <strong>${val.toFixed(s.decimals ?? 0)}</strong></span>
       </div>`;
     }).join('');
     return `<div style="padding:8px 10px;font-family:sans-serif;min-width:180px">
