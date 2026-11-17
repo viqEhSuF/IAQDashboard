@@ -37,12 +37,14 @@ Then reflash each station with the V2 firmware, keeping its V1 station number.
   readings, so each station gets a V2 temperature correction from the
   conversion time on that matches V1's: `slope = 1 / tempScale`,
   `offset = (32 / tempScale - 32) / 1.8` (about −1.4 °C, or −2.5 °F, at room
-  temperature for 1.034). Check it against a reference afterwards.
+  temperature for 1.034). If the V1 sketches used a different `tempScale`,
+  give it as `V1_TEMP_SCALE=...` after `sudo`. Check the correction against a
+  reference afterwards.
 - **Humidity will step down at the conversion** unless you choose otherwise.
   V2 shows humidity as measured; V1 multiplied it by `rHscale` (1.116), so V2
   reads about a tenth lower than V1 did for the same air (50% becomes about
-  45%). Set `@v1_rh_unscale` in `import_v1.sql` to the V1 `rHscale` to divide
-  it back out of the history instead.
+  45%). To divide V1's scaling back out of the history instead, so it matches
+  V2, run the import with `sudo V1_RH_UNSCALE=1.116 bash import_v1.sh ...`.
 - **Gaps stay gaps.** V1's "not available" codes (PM 6554, VOC 3277, RH 366,
   CO2 0, and similar) and other impossible values become empty readings.
   Humidity that V1's scaling pushed over 100% (up to 112%) is stored as 100.
@@ -59,14 +61,17 @@ Then reflash each station with the V2 firmware, keeping its V1 station number.
 
 `import_v1.sh` can be run again with the same export: readings already in V2
 are skipped, and names and temperature corrections already set in V2 are
-kept. To redo the V1 history with different settings (such as
-`@v1_rh_unscale`), delete the imported readings first, then run the import
-again. Use the conversion time from the import summary:
+kept. To redo the V1 history with a different humidity setting, delete the
+imported readings first, then run the import again. Use the conversion time
+from the import summary:
 
 ```bash
 sudo mariadb buildingData -e "DELETE FROM sen55_readings WHERE measured_at < '<conversion time>'"
-sudo bash ~/IAQDashboard/migration/import_v1.sh ~/v1_export_YYYYMMDD_HHMM.sql.gz
+sudo V1_RH_UNSCALE=1.116 bash ~/IAQDashboard/migration/import_v1.sh ~/v1_export_YYYYMMDD_HHMM.sql.gz
 ```
+
+(A different `V1_TEMP_SCALE` on a re-run doesn't change corrections already
+in place; change those as in step 7 of the guide.)
 
 When the dashboard looks right, remove the staging copy:
 

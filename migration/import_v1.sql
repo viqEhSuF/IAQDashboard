@@ -18,15 +18,18 @@
 
 USE buildingData;
 
--- The V1 sketch's correction factors (near its top). The same values are used
--- for every station; a station whose sketch had different ones can be
--- adjusted afterwards (conversion guide, step 7).
-SET @v1_temp_scale := 1.034;    -- tempScale: V1 recorded deg F / 1.034
+-- Settings. import_v1.sh sets them from V1_TEMP_SCALE and V1_RH_UNSCALE when
+-- given; otherwise these defaults apply.
+--
+-- The V1 sketch's tempScale (near its top): V1 recorded deg F / tempScale.
+-- The same value is used for every station; a station whose sketch had a
+-- different one can be adjusted afterwards (conversion guide, step 7).
+SET @v1_temp_scale := IFNULL(@v1_temp_scale, 1.034);
 
 -- V2 shows humidity as measured; V1 recorded it multiplied by rHscale.
--- 1 keeps V1 humidity as V1 recorded it. Set it to the V1 rHscale (1.116) to
--- divide that back out, so the history matches V2's uncorrected humidity.
-SET @v1_rh_unscale := 1;
+-- 1 keeps V1 humidity as V1 recorded it. The V1 rHscale (1.116) divides it
+-- back out, so the history matches V2's uncorrected humidity.
+SET @v1_rh_unscale := IFNULL(@v1_rh_unscale, 1);
 
 -- Handle V1 times without shifting them: TIMESTAMP columns are read in UTC
 -- (as the export wrote them); DATETIME columns are local wall-clock times.

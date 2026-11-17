@@ -9,8 +9,12 @@
 # it into the V2 tables with import_v1.sql. Safe to run again: readings already
 # imported are skipped, and nothing already in V2 is overwritten.
 #
-# IGNORE_TZ=1 skips the time zone check. Use it only when the V1 Pi was set to
-# the wrong time zone and this one is set to the right one.
+# Settings, given after sudo (for example sudo V1_RH_UNSCALE=1.116 bash ...):
+#   V1_TEMP_SCALE  the V1 sketch's tempScale, if not 1.034
+#   V1_RH_UNSCALE  the V1 rHscale (1.116) to divide V1's humidity scaling out
+#                  of the history; leave it out to keep humidity as V1 recorded it
+#   IGNORE_TZ=1    skip the time zone check. Use it only when the V1 Pi was set
+#                  to the wrong time zone and this one is set to the right one.
 
 set -euo pipefail
 
@@ -25,6 +29,13 @@ if [ -z "$EXPORT" ] || [ ! -f "$EXPORT" ]; then
   echo "Usage: sudo bash $0 <v1_export_....sql.gz>" >&2
   exit 1
 fi
+for SETTING in V1_TEMP_SCALE V1_RH_UNSCALE; do
+  if [ -n "${!SETTING:-}" ] && ! { [[ "${!SETTING}" =~ ^[0-9]+(\.[0-9]+)?$ ]] &&
+       awk -v v="${!SETTING}" 'BEGIN { exit !(v >= 0.5 && v <= 2) }'; }; then
+    echo "$SETTING must be a scale factor between 0.5 and 2, like 1.116 (got '${!SETTING}')." >&2
+    exit 1
+  fi
+done
 
 # 1. The V2 schema must be in place
 if ! mariadb -N -e "SELECT 1 FROM buildingData.sen55_readings LIMIT 1" >/dev/null 2>&1; then
@@ -83,7 +94,9 @@ fi
 
 # 5. Copy into the V2 tables
 echo "Copying readings and station names into V2..."
-mariadb -t < "$HERE/import_v1.sql"
+{ echo "SET @v1_temp_scale := ${V1_TEMP_SCALE:-NULL}, @v1_rh_unscale := ${V1_RH_UNSCALE:-NULL};"
+  cat "$HERE/import_v1.sql"
+} | mariadb -t
 
 # The dashboard's queries need up-to-date statistics after a bulk load
 mariadb buildingData -e "ANALYZE TABLE sen55_readings, stations, station_calibration" >/dev/null
