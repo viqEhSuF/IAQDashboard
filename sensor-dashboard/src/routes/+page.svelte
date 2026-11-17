@@ -317,14 +317,26 @@
     dpChart = createTimeSeriesData(sensorData, 'indoorTd');
   }
   
+  // Decimal places each measure is shown with. Values are rounded to this
+  // before plotting, so the line only moves when the displayed number changes.
+  const FIELD_DECIMALS: Partial<Record<keyof NormalizedSensorData, number>> = {
+    pmass1: 1, pmass25: 1, pmass4: 1, pmass10: 1, HCHO: 1
+  };
+
+  function roundTo(v: number, decimals: number): number {
+    const f = 10 ** decimals;
+    return Math.round(v * f) / f;
+  }
+
   // Readings with no value for this field (null) are left out rather than
   // plotted as zero
   function createTimeSeriesData(data: NormalizedSensorData[], field: keyof NormalizedSensorData): DataRecord[] {
+    const decimals = FIELD_DECIMALS[field] ?? 0;
     return data
       .filter(d => d[field] !== null && d[field] !== undefined)
       .map(d => ({
         x: new Date(d.recTime).getTime(),
-        y: Number(d[field])
+        y: roundTo(Number(d[field]), decimals)
       }))
       .sort((a, b) => a.x - b.x);
   }
