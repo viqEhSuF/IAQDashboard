@@ -36,8 +36,8 @@ CREATE TABLE stations (
 -- ---------------------------------------------------------------------------
 -- 2. Calibration, with the period each value applies to
 --    corrected = raw * slope + offset_val
---    metric: 'temp_c'  enclosure self-heating, in deg C (RH is recalculated
---                      from it in sen55_display, so RH needs no row)
+--    metric: 'temp_c'  enclosure self-heating, in deg C (temperature only;
+--                      humidity is shown as measured)
 --            'pm'      all four PM sizes
 --            'hcho'    SFA30 formaldehyde, ppb
 --            'co2'     SCD40, ppm
@@ -133,18 +133,19 @@ LEFT JOIN station_calibration cc
 -- What the dashboard reads: the same column names and units as the old
 -- IAQ_SEN55 table (temp and DP in deg F). If the dashboard expects a different
 -- name for the timestamp column, change the measured_at alias here.
---  * RH is recalculated at the corrected temperature (Magnus saturation vapor
---    pressure ratio): the water content is unchanged, only the temperature it
---    is referenced to changes. Capped at 100%.
---  * Dew point uses the raw temp/RH, because self-heating doesn't change it.
+--  * Temperature has each station's correction applied.
+--  * Humidity is shown as the SEN55 reports it. The temperature correction
+--    does not change it: against a reference meter, the SEN55's humidity
+--    matches the room even while its temperature reads high.
+--  * Dew point is calculated (Magnus formula) from the corrected temperature
+--    and the humidity shown, so all three agree with each other.
 CREATE OR REPLACE ALGORITHM = MERGE VIEW sen55_display AS
 SELECT
   c.station_id AS location,
   c.station_name,
   c.measured_at,
   ROUND(c.temp_c * 1.8 + 32, 1) AS temp,
-  ROUND(LEAST(100, c.rh_raw * EXP(17.62 * c.temp_c_raw / (243.12 + c.temp_c_raw)
-                                  - 17.62 * c.temp_c / (243.12 + c.temp_c))), 1) AS rH,
+  ROUND(c.rh_raw, 1) AS rH,
   ROUND(c.pm1, 1)  AS pmass1,
   ROUND(c.pm25, 1) AS pmass25,
   ROUND(c.pm4, 1)  AS pmass4,
@@ -154,8 +155,8 @@ SELECT
   ROUND(c.hcho, 1) AS HCHO,
   ROUND(c.co2, 0)  AS CO2,
   ROUND(IF(c.rh_raw > 0,
-           243.12 * (LN(c.rh_raw / 100) + 17.62 * c.temp_c_raw / (243.12 + c.temp_c_raw))
-             / (17.62 - (LN(c.rh_raw / 100) + 17.62 * c.temp_c_raw / (243.12 + c.temp_c_raw))),
+           243.12 * (LN(c.rh_raw / 100) + 17.62 * c.temp_c / (243.12 + c.temp_c))
+             / (17.62 - (LN(c.rh_raw / 100) + 17.62 * c.temp_c / (243.12 + c.temp_c))),
            NULL) * 1.8 + 32, 1) AS DP
 FROM sen55_corrected c;
 
@@ -218,11 +219,12 @@ GRANT UPDATE (name) ON buildingData.stations TO 'iaq_dashboard'@'localhost';
 -- ---------------------------------------------------------------------------
 -- Stations register on their first post; name them from the dashboard.
 --
--- Starting temperature correction for each station, then verify against a reference:
---   INSERT INTO station_calibration (station_id, metric, offset_val, note)
---   VALUES (1, 'temp_c', -1.9, 'starting estimate, verify'),
---          (2, 'temp_c', -1.9, 'starting estimate, verify'),
---          (3, 'temp_c', -1.9, 'starting estimate, verify');
+-- Temperature correction for each station: the offset is a reference
+-- thermometer's reading in deg C minus the station's raw temp_c averaged over
+-- the same 30 minutes (about -3.6 on the first V2 station). Set valid_from to
+-- when the station was installed to correct its readings from the start:
+--   INSERT INTO station_calibration (station_id, metric, offset_val, valid_from, note)
+--   VALUES (1, 'temp_c', -3.6, '2026-11-16 19:30:00', 'vs reference thermometer');
 --
 -- To change a calibration from a given time onward, close the current row and
 -- add a new one:
