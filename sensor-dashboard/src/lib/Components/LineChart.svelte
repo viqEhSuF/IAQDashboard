@@ -1,6 +1,8 @@
 <script lang="ts">
-  import { VisXYContainer, VisLine, VisAxis, VisTooltip, VisCrosshair } from '@unovis/svelte';
-  import { Line } from '@unovis/ts';
+  import { VisXYContainer, VisLine, VisAxis, VisTooltip, VisCrosshair, VisFreeBrush } from '@unovis/svelte';
+  import { Line, FreeBrushMode } from '@unovis/ts';
+  import type { FreeBrushSelection } from '@unovis/ts';
+  import { timeTickFormat, timeTicks, MIN_ZOOM_MS } from '$lib/zoom';
   
   // Define the data type expected
   type DataRecord = {
@@ -40,6 +42,23 @@
   // readings isn't squeezed down to make room for a level far above them.
   export let thresholds: Threshold[] = [];
   export let unit: string = '';
+  // Called with [start, end] (ms) when the user drags across the chart.
+  // Without it, the chart can't be zoomed.
+  export let onZoom: ((range: [number, number]) => void) | undefined = undefined;
+  // While zoomed, a Reset zoom button shows over the chart and calls onResetZoom
+  export let zoomed: boolean = false;
+  export let onResetZoom: (() => void) | undefined = undefined;
+
+  function handleBrushEnd(selection: FreeBrushSelection | undefined, _event: unknown, userDriven: boolean) {
+    if (!userDriven || !selection || !onZoom) return;
+    const [start, end] = selection as [number, number];
+    if (end - start >= MIN_ZOOM_MS) onZoom([start, end]);
+  }
+
+  // Time labels: with minutes for short windows, with the date for longer ones
+  $: xTickFormat = timeTickFormat(data.length > 1 ? data[data.length - 1].x - data[0].x : 0);
+  // Round-time ticks for short windows; undefined keeps the chart's own
+  $: xTickValues = data.length > 1 ? timeTicks(data[0].x, data[data.length - 1].x) : undefined;
 
   $: dataMax = data.length ? Math.max(...data.map(d => d.y)) : 0;
   $: shownThresholds = thresholds.filter((t, i) => i === 0 || dataMax >= thresholds[i - 1].value);
@@ -204,6 +223,9 @@
 </script>
 
 <div class="chart-container">
+  {#if zoomed && onResetZoom}
+    <button class="reset-zoom" on:click={onResetZoom}>Reset zoom</button>
+  {/if}
   <div style="height: {height}px; width: 100%;">
     {#if data.length === 0}
       <div class="flex justify-center items-center h-full">
@@ -239,14 +261,8 @@
           type="x"
           numTicks={xAxisOptions.numTicks}
           gridLine={xAxisOptions.gridLine}
-          tickFormat={(x: number) => {
-            const date = new Date(x);
-            return date.toLocaleString(undefined, { 
-              month: 'short', 
-              day: 'numeric', 
-              hour: '2-digit', 
-            });
-          }}
+          tickFormat={xTickFormat}
+          tickValues={xTickValues}
           tickTextColor={xAxisOptions.tickTextColor}
           tickTextFontSize={xAxisOptions.tickTextFontSize}
         />
@@ -264,6 +280,9 @@
         />
         <VisCrosshair {x} {y} color={color} template={crosshairTemplate} />
         <VisTooltip />
+        {#if onZoom}
+          <VisFreeBrush mode={FreeBrushMode.X} onBrushEnd={handleBrushEnd} />
+        {/if}
       </VisXYContainer>
       {/key}
     {/if}
@@ -311,6 +330,24 @@
     margin-right: 4px;
   }
   
+  .reset-zoom {
+    position: absolute;
+    top: 0;
+    right: 0;
+    z-index: 2;
+    padding: 2px 10px;
+    font-size: 0.75rem;
+    font-weight: 500;
+    color: #334155;
+    background: #f1f5f9;
+    border: 1px solid #e2e8f0;
+    border-radius: 9999px;
+  }
+
+  .reset-zoom:hover {
+    background: #e2e8f0;
+  }
+
   .legend-dash {
     display: inline-block;
     width: 18px;

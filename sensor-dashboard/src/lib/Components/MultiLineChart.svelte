@@ -1,5 +1,8 @@
 <script lang="ts">
-  import { VisXYContainer, VisLine, VisAxis, VisTooltip, VisCrosshair } from '@unovis/svelte';
+  import { VisXYContainer, VisLine, VisAxis, VisTooltip, VisCrosshair, VisFreeBrush } from '@unovis/svelte';
+  import { FreeBrushMode } from '@unovis/ts';
+  import type { FreeBrushSelection } from '@unovis/ts';
+  import { inZoom, timeTickFormat, timeTicks, MIN_ZOOM_MS } from '$lib/zoom';
 
   type DataRecord = { x: number; y: number };
 
@@ -13,8 +16,20 @@
 
   export let series: SeriesConfig[] = [];
   export let height: number = 380;
+  // Shared zoom window [start, end] in ms, and the callback for a drag across the chart
+  export let zoomRange: [number, number] | null = null;
+  export let onZoom: ((range: [number, number]) => void) | undefined = undefined;
+  export let onResetZoom: (() => void) | undefined = undefined;
 
-  $: activeSeries = series.filter(s => s.data.length > 0);
+  function handleBrushEnd(selection: FreeBrushSelection | undefined, _event: unknown, userDriven: boolean) {
+    if (!userDriven || !selection || !onZoom) return;
+    const [start, end] = selection as [number, number];
+    if (end - start >= MIN_ZOOM_MS) onZoom([start, end]);
+  }
+
+  $: activeSeries = series
+    .map(s => ({ ...s, data: inZoom(s.data, zoomRange) }))
+    .filter(s => s.data.length > 0);
   $: leftSeries   = activeSeries.filter(s => (s.axis ?? 'left') === 'left');
   $: rightSeries  = activeSeries.filter(s => s.axis === 'right');
   $: isDualAxis   = leftSeries.length > 0 && rightSeries.length > 0;
@@ -105,26 +120,36 @@
     </div>`;
   };
 
-  const xTickFormat = (v: number) =>
-    new Date(v).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit' });
+  $: xExtent = (() => {
+    let lo = Infinity, hi = -Infinity;
+    for (const s of activeSeries) for (const pt of s.data) { lo = Math.min(lo, pt.x); hi = Math.max(hi, pt.x); }
+    return hi > lo ? [lo, hi] : [0, 0];
+  })();
+  $: xTickFormat = timeTickFormat(xExtent[1] - xExtent[0]);
+  $: xTickValues = timeTicks(xExtent[0], xExtent[1]);
 
   // Shared fixed margins so both overlaid containers align perfectly.
   const dualMargin = { top: 10, right: 70, bottom: 50, left: 70 };
 </script>
 
 <div class="multi-chart">
+  {#if zoomRange && onResetZoom}
+    <button class="reset-zoom" on:click={onResetZoom}>Reset zoom</button>
+  {/if}
   {#if activeSeries.length === 0}
     <div class="empty">No data to display</div>
   {:else if isDualAxis}
+    {#key joinedData}
     <div class="dual-wrap">
       <!-- Base container: left-axis series, x-axis, left y-axis, crosshair -->
       <VisXYContainer data={joinedData} {height} yDomain={leftDomain} margin={dualMargin} autoMargin={false}>
         <VisLine x={xAccessor} y={leftYAccessors} color={leftColors}
           curveType="monotoneX" lineWidth={2} highlightOnHover={true} />
-        <VisAxis type="x" position="bottom" label="Time" numTicks={6} gridLine={true} tickFormat={xTickFormat} />
+        <VisAxis type="x" position="bottom" label="Time" numTicks={6} gridLine={true} tickFormat={xTickFormat} tickValues={xTickValues} />
         <VisAxis type="y" position="left" numTicks={5} gridLine={true} />
         <VisCrosshair x={xAccessor} y={crosshairY} color={activeSeries[0]?.color ?? '#1d4ed8'} template={crosshairTemplate} />
         <VisTooltip />
+        {#if onZoom}<VisFreeBrush mode={FreeBrushMode.X} onBrushEnd={handleBrushEnd} />{/if}
       </VisXYContainer>
       <!-- Overlay container: right-axis series and right y-axis only -->
       <div class="overlay">
@@ -135,15 +160,19 @@
         </VisXYContainer>
       </div>
     </div>
+    {/key}
   {:else}
+    {#key joinedData}
     <VisXYContainer data={joinedData} {height}>
       <VisLine x={xAccessor} y={allYAccessors} color={allColors}
         curveType="monotoneX" lineWidth={2} highlightOnHover={true} />
-      <VisAxis type="x" position="bottom" label="Time" numTicks={6} gridLine={true} tickFormat={xTickFormat} />
+      <VisAxis type="x" position="bottom" label="Time" numTicks={6} gridLine={true} tickFormat={xTickFormat} tickValues={xTickValues} />
       <VisAxis type="y" position="left" numTicks={5} gridLine={true} />
       <VisCrosshair x={xAccessor} y={crosshairY} color={activeSeries[0]?.color ?? '#1d4ed8'} template={crosshairTemplate} />
       <VisTooltip />
+      {#if onZoom}<VisFreeBrush mode={FreeBrushMode.X} onBrushEnd={handleBrushEnd} />{/if}
     </VisXYContainer>
+    {/key}
   {/if}
 
   <div class="legend">
@@ -162,6 +191,22 @@
   .multi-chart { position: relative; }
 
   .dual-wrap { position: relative; }
+
+  .reset-zoom {
+    position: absolute;
+    top: 0;
+    right: 0;
+    z-index: 3;
+    padding: 2px 10px;
+    font-size: 0.75rem;
+    font-weight: 500;
+    color: #334155;
+    background: #f1f5f9;
+    border: 1px solid #e2e8f0;
+    border-radius: 9999px;
+  }
+
+  .reset-zoom:hover { background: #e2e8f0; }
 
   .overlay {
     position: absolute;

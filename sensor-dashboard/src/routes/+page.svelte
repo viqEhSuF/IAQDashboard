@@ -5,6 +5,7 @@
   import type { NormalizedSensorData, LocationData, StationHealth } from '$lib/models';
   import { getApiUrl } from '$lib/config';
   import { GUIDELINES } from '$lib/guidelines';
+  import { inZoom, describeZoom } from '$lib/zoom';
   
   // Define data record type that matches the LineChart component
   type DataRecord = {
@@ -189,6 +190,7 @@
   }
 
   function selectPreset(hours: number) {
+    zoomRange = null;
     presetHours = hours;
     applyPreset(hours);
     fetchData();
@@ -291,12 +293,14 @@
 
   // Handle date input changes: a range picked by hand stays where it is
   function handleDateChange() {
+    zoomRange = null;
     presetHours = null;
     fetchData();
   }
 
   // Reset date filters and fetch all data
   function resetDateFilters() {
+    zoomRange = null;
     presetHours = null;
     startDate = '';
     endDate = '';
@@ -340,6 +344,30 @@
       }))
       .sort((a, b) => a.x - b.x);
   }
+
+  // ── Zoom ───────────────────────────────────────────────────────────────
+
+  // Time window [start, end] in ms chosen by dragging across a chart. It
+  // applies to every chart, so they stay lined up; the readings already loaded
+  // are filtered, nothing is fetched. Cleared when the station or range changes.
+  let zoomRange: [number, number] | null = null;
+
+  function zoomTo(range: [number, number]) {
+    zoomRange = range;
+  }
+
+  function resetZoom() {
+    zoomRange = null;
+  }
+
+  $: tempShown     = inZoom(tempChart, zoomRange);
+  $: co2Shown      = inZoom(co2Chart, zoomRange);
+  $: humidityShown = inZoom(humidityChart, zoomRange);
+  $: vocShown      = inZoom(vocChart, zoomRange);
+  $: pmassShown    = inZoom(pmassChart, zoomRange);
+  $: noxShown      = inZoom(noxChart, zoomRange);
+  $: hchoShown     = inZoom(hchoChart, zoomRange);
+  $: dpShown       = inZoom(dpChart, zoomRange);
 
   // ── Station health ─────────────────────────────────────────────────────
 
@@ -597,7 +625,7 @@
             {:else}
               <div class="group flex items-center gap-0.5">
                 <button
-                  on:click={() => { selectedLocation = loc.location; fetchData(); }}
+                  on:click={() => { selectedLocation = loc.location; zoomRange = null; fetchData(); }}
                   class="px-4 py-1.5 rounded-full text-sm font-medium transition-colors {selectedLocation === loc.location ? 'bg-slate-700 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}"
                 >
                   {locationLabel(loc.location)}
@@ -741,7 +769,8 @@
     {:else}
 
       <!-- Summary bar -->
-      <p class="text-sm text-gray-400 px-1">
+      <div class="text-sm text-gray-400 px-1 space-y-1">
+      <p>
         Showing <span class="font-medium text-gray-600">{sensorData.length.toLocaleString()}</span> readings
         · <span class="font-medium text-gray-600">{new Date(sensorData[sensorData.length - 1].recTime).toLocaleString()}</span>
         → <span class="font-medium text-gray-600">{new Date(sensorData[0].recTime).toLocaleString()}</span>
@@ -756,6 +785,18 @@
           {/if}
         {/if}
       </p>
+      <p class="flex flex-wrap items-center gap-2">
+        {#if zoomRange}
+          <span class="text-gray-600">Zoomed to <span class="font-medium">{describeZoom(zoomRange)}</span></span>
+          <button on:click={resetZoom}
+            class="px-2.5 py-0.5 rounded-full text-xs font-medium bg-slate-700 text-white hover:bg-slate-800 transition-colors">
+            Reset zoom
+          </button>
+        {:else}
+          <span>Drag across a chart to zoom in on part of it.</span>
+        {/if}
+      </p>
+      </div>
 
       <!-- Chart cards -->
       <div class="space-y-4">
@@ -764,7 +805,8 @@
           <div class="card-header">
             <h2 class="card-title">Temperature</h2>
           </div>
-          <LineChart data={tempChart} label="Temperature (°F)" color="#ef4444"
+          <LineChart data={tempShown} onZoom={zoomTo} zoomed={zoomRange !== null} onResetZoom={resetZoom}
+            label="Temperature (°F)" color="#ef4444"
             yAxisOptions={tempAxisOptions} xAxisOptions={xAxisOptions} />
         </section>
 
@@ -773,7 +815,8 @@
             <h2 class="card-title">CO₂</h2>
             <p class="card-note">Warning from 1,000 ppm, when ventilation should be increased; very high above 2,000 ppm (German Environment Agency indoor guide values). Health Canada's limit for homes is also 1,000 ppm, averaged over 24 hours.</p>
           </div>
-          <LineChart data={co2Chart} label="CO2 (ppm)" color="#10b981"
+          <LineChart data={co2Shown} onZoom={zoomTo} zoomed={zoomRange !== null} onResetZoom={resetZoom}
+            label="CO2 (ppm)" color="#10b981"
             thresholds={GUIDELINES.co2} unit="ppm"
             yAxisOptions={co2AxisOptions} xAxisOptions={xAxisOptions} />
         </section>
@@ -782,7 +825,8 @@
           <div class="card-header">
             <h2 class="card-title">Humidity</h2>
           </div>
-          <LineChart data={humidityChart} label="Humidity (%)" color="#3b82f6"
+          <LineChart data={humidityShown} onZoom={zoomTo} zoomed={zoomRange !== null} onResetZoom={resetZoom}
+            label="Humidity (%)" color="#3b82f6"
             xAxisOptions={xAxisOptions} />
         </section>
 
@@ -791,7 +835,8 @@
             <h2 class="card-title">VOC</h2>
             <p class="card-note">Volatile Organic Compound index (1–500). Relative to the sensor's 24-hour rolling baseline — a value of 100 represents the average VOC level. Values above 100 indicate more VOCs than the recent average (e.g., cooking, cleaning); values below 100 indicate fewer VOCs (e.g., fresh air from an open window or air purifier).</p>
           </div>
-          <LineChart data={vocChart} label="VOC Index" color="#8b5cf6"
+          <LineChart data={vocShown} onZoom={zoomTo} zoomed={zoomRange !== null} onResetZoom={resetZoom}
+            label="VOC Index" color="#8b5cf6"
             yAxisOptions={vocAxisOptions} xAxisOptions={xAxisOptions} />
         </section>
 
@@ -800,7 +845,8 @@
             <h2 class="card-title">Particulate Matter (PM2.5)</h2>
             <p class="card-note">Warning above 15 μg/m³ (WHO guideline) and very high above 35 μg/m³ (US EPA standard), both averaged over 24 hours. Short peaks from cooking or cleaning are normal.</p>
           </div>
-          <LineChart data={pmassChart} label="PM2.5 (μg/m³)" color="#f59e0b"
+          <LineChart data={pmassShown} onZoom={zoomTo} zoomed={zoomRange !== null} onResetZoom={resetZoom}
+            label="PM2.5 (μg/m³)" color="#f59e0b"
             thresholds={GUIDELINES.pm25} unit="μg/m³" decimals={1}
             yAxisOptions={pmAxisOptions} xAxisOptions={xAxisOptions} />
         </section>
@@ -810,7 +856,8 @@
             <h2 class="card-title">NOx</h2>
             <p class="card-note">Nitrogen Oxides index (1–500). Relative to the sensor's 24-hour rolling baseline — a value of 1 means (nearly) no NOx detected. Values above 1 indicate elevated oxidising gases; spikes above 20 are typical of gas cooking or similar sources.</p>
           </div>
-          <LineChart data={noxChart} label="NOx Index" color="#f97316"
+          <LineChart data={noxShown} onZoom={zoomTo} zoomed={zoomRange !== null} onResetZoom={resetZoom}
+            label="NOx Index" color="#f97316"
             yAxisOptions={noxAxisOptions} xAxisOptions={xAxisOptions} />
         </section>
 
@@ -819,7 +866,8 @@
             <h2 class="card-title">Formaldehyde (HCHO)</h2>
             <p class="card-note">Warning above 40 ppb averaged over 8 hours, very high above 100 ppb averaged over 1 hour (Health Canada residential guideline).</p>
           </div>
-          <LineChart data={hchoChart} label="HCHO (ppb)" color="#06b6d4"
+          <LineChart data={hchoShown} onZoom={zoomTo} zoomed={zoomRange !== null} onResetZoom={resetZoom}
+            label="HCHO (ppb)" color="#06b6d4"
             thresholds={GUIDELINES.hcho} unit="ppb" decimals={1}
             yAxisOptions={hchoAxisOptions} xAxisOptions={xAxisOptions} />
         </section>
@@ -828,7 +876,8 @@
           <div class="card-header">
             <h2 class="card-title">Dew Point</h2>
           </div>
-          <LineChart data={dpChart} label="Dew Point (°F)" color="#64748b"
+          <LineChart data={dpShown} onZoom={zoomTo} zoomed={zoomRange !== null} onResetZoom={resetZoom}
+            label="Dew Point (°F)" color="#64748b"
             yAxisOptions={dpAxisOptions} xAxisOptions={xAxisOptions} />
         </section>
 
@@ -913,7 +962,7 @@
               <span class="font-semibold">Error:</span> {overlayError}
             </div>
           {:else if overlaySeries.length > 0}
-            <MultiLineChart series={overlaySeries} height={380} />
+            <MultiLineChart series={overlaySeries} height={380} {zoomRange} onZoom={zoomTo} onResetZoom={resetZoom} />
           {:else}
             <div class="flex items-center justify-center h-32 bg-gray-50 rounded-lg border border-dashed border-gray-200">
               <p class="text-gray-400 text-sm">Your overlay chart will appear here</p>
