@@ -187,11 +187,11 @@ SELECT
   (d.status_24h >> 7)  & 1 AS gas_sensor_error_24h,
   (d.status_24h >> 21) & 1 AS fan_speed_warning_24h
 FROM stations s
-LEFT JOIN (SELECT station_id, MAX(measured_at) AS last_at
-           FROM sen55_readings GROUP BY station_id) m
-       ON m.station_id = s.station_id
 LEFT JOIN sen55_readings r
-       ON r.station_id = m.station_id AND r.measured_at = m.last_at
+       ON r.station_id = s.station_id
+      AND r.measured_at = (SELECT m.measured_at FROM sen55_readings m
+                           WHERE m.station_id = s.station_id
+                           ORDER BY m.measured_at DESC LIMIT 1)
 LEFT JOIN (SELECT station_id, BIT_OR(sen55_status) AS status_24h
            FROM sen55_readings
            WHERE measured_at >= NOW() - INTERVAL 1 DAY

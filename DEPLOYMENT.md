@@ -6,6 +6,10 @@ Target: Raspberry Pi 4 or 5 running 64-bit Raspberry Pi OS.
 > (`database/iaq_schema.sql`), where stations post raw readings to
 > `ingest/iaq_ingest.php` and calibration is applied in the database.
 > Systems still on the old `IAQ_SEN55` table stay on `main`.
+>
+> **Converting a V1 site and keeping its data?** Set up the new card with this
+> checklist, then follow the conversion guide; the scripts it uses are in
+> `migration/` (see `migration/README.md`).
 
 ---
 
@@ -330,8 +334,14 @@ sudo mariadb buildingData < database/updates/<file>.sql
 ```
 
 They change only the views the dashboard reads, never stored readings, and are
-safe to run more than once. A system installed from the current
-`database/iaq_schema.sql` already includes every update up to that point.
+safe to run more than once. Running every file in order is also fine:
+
+```bash
+for f in database/updates/*.sql; do sudo mariadb buildingData < "$f"; done
+```
+
+A system installed from the current `database/iaq_schema.sql` already includes
+every update up to that point.
 
 ---
 
