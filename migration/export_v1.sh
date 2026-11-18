@@ -26,6 +26,10 @@ fi
 
 # Root normally logs in through the system account; ask for a password if not
 if ! "$SQL" -e "SELECT 1" >/dev/null 2>&1; then
+  if [ ! -t 0 ]; then
+    echo "Couldn't log in to MariaDB as root. Run this in a terminal to enter the password." >&2
+    exit 1
+  fi
   read -rsp "MariaDB root password: " MYSQL_PWD; echo
   export MYSQL_PWD
   if ! "$SQL" -u root -e "SELECT 1" >/dev/null 2>&1; then

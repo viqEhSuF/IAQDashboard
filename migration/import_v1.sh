@@ -2,7 +2,8 @@
 # Imports a V1 export (from export_v1.sh) into a V2 system.
 #
 # Run on the V2 Pi after database/iaq_schema.sql has been applied and the Pi's
-# time zone set to the site's, before the stations are reflashed:
+# time zone set to the site's. Stations can be reflashed before or after; each
+# station's conversion time is one second after its own last V1 reading.
 #   sudo bash ~/IAQDashboard/migration/import_v1.sh ~/v1_export_YYYYMMDD_HHMM.sql.gz
 #
 # Loads the export into a separate staging database (v1_import), then copies
@@ -13,6 +14,9 @@
 #   V1_TEMP_SCALE  the V1 sketch's tempScale, if not 1.034
 #   V1_RH_UNSCALE  the V1 rHscale (1.116) to divide V1's humidity scaling out
 #                  of the history; leave it out to keep humidity as V1 recorded it
+#   REPLACE_HISTORY=1  delete what V2 holds for each station up to its last V1
+#                  reading (an earlier import, or test readings), then import.
+#                  Use it to redo the history with a different V1_RH_UNSCALE.
 #   IGNORE_TZ=1    skip the time zone check. Use it only when the V1 Pi was set
 #                  to the wrong time zone and this one is set to the right one.
 
@@ -36,6 +40,11 @@ for SETTING in V1_TEMP_SCALE V1_RH_UNSCALE; do
     exit 1
   fi
 done
+
+if [ -n "${REPLACE_HISTORY:-}" ] && [ "$REPLACE_HISTORY" != 1 ]; then
+  echo "REPLACE_HISTORY must be 1 (got '$REPLACE_HISTORY')." >&2
+  exit 1
+fi
 
 # 1. The V2 schema must be in place
 if ! mariadb -N -e "SELECT 1 FROM buildingData.sen55_readings LIMIT 1" >/dev/null 2>&1; then
@@ -77,24 +86,29 @@ if [ "${IGNORE_TZ:-0}" = 1 ] && [ "$RECTIME_TYPE" != timestamp ]; then
   exit 1
 fi
 
-# 4. On the first run, V2 should hold no readings from V1's time span (from
-#    bench testing, for example). Readings from stations already running V2
-#    firmware here come after it and are fine.
-FIRST_RUN=$(mariadb -N buildingData -e "SELECT COUNT(*) = 0 FROM station_calibration WHERE note LIKE 'V2 readings from the conversion on%'")
-V1_LAST=$(mariadb -N -e "SELECT MAX(recTime) FROM v1_import.IAQ_SEN55")
-OVERLAP=$(mariadb -N buildingData -e "SELECT COUNT(*) FROM sen55_readings WHERE measured_at <= '$V1_LAST'")
-if [ "$FIRST_RUN" = 1 ] && [ "$OVERLAP" -gt 0 ]; then
-  echo "This V2 database already has $OVERLAP readings from before the V1 system's last"
-  echo "reading ($V1_LAST), probably from testing. They would be mixed into the station"
-  echo "history. To clear them first:"
-  echo "  sudo mariadb buildingData -e \"DELETE FROM sen55_readings WHERE measured_at <= '$V1_LAST'\""
+# 4. V2 should hold no readings from a station's V1 period that weren't
+#    imported from V1 (test readings, for example). Readings from stations
+#    already reflashed come after their last V1 reading and are fine.
+V1_LAST="SELECT CAST(TRIM(location) AS UNSIGNED) AS station_id, MAX(recTime) AS last_v1
+         FROM v1_import.IAQ_SEN55 WHERE TRIM(location) REGEXP '^[0-9]+\$' GROUP BY 1"
+NOT_IMPORTED=""
+if [ -n "$(mariadb -N -e "SELECT 1 FROM information_schema.TABLES WHERE TABLE_SCHEMA = 'buildingData' AND TABLE_NAME = 'v1_conversion'")" ]; then
+  NOT_IMPORTED="AND r.station_id NOT IN (SELECT station_id FROM v1_conversion)"
+fi
+OVERLAP=$(mariadb -N buildingData -e "SELECT COUNT(*) FROM sen55_readings r JOIN ($V1_LAST) v
+  ON v.station_id = r.station_id WHERE r.measured_at <= v.last_v1 $NOT_IMPORTED")
+if [ "$OVERLAP" -gt 0 ] && [ "${REPLACE_HISTORY:-0}" != 1 ]; then
+  echo "This V2 database already has $OVERLAP readings from before some stations'"
+  echo "last V1 reading, probably from testing. They would be mixed into the history."
+  echo "To delete them and import, run this again with REPLACE_HISTORY=1:"
+  echo "  sudo REPLACE_HISTORY=1 bash $0 $EXPORT"
   read -rp "Continue anyway and keep them? [y/N] " ANSWER || ANSWER=n
   [[ "$ANSWER" =~ ^[Yy] ]] || exit 1
 fi
 
 # 5. Copy into the V2 tables
 echo "Copying readings and station names into V2..."
-{ echo "SET @v1_temp_scale := ${V1_TEMP_SCALE:-NULL}, @v1_rh_unscale := ${V1_RH_UNSCALE:-NULL};"
+{ echo "SET @v1_temp_scale := ${V1_TEMP_SCALE:-NULL}, @v1_rh_unscale := ${V1_RH_UNSCALE:-NULL}, @replace_history := ${REPLACE_HISTORY:-NULL};"
   cat "$HERE/import_v1.sql"
 } | mariadb -t
 

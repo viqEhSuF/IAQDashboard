@@ -8,18 +8,19 @@
 --    (tempScale, rHscale), so V1 readings are stored as V1 recorded them and
 --    no V2 correction applies to them.
 --  * V2 firmware sends uncorrected readings. Each station gets a V2
---    temperature correction starting just after its last V1 reading (the
---    conversion time), set to the same correction V1 used, so temperatures
---    carry on without a step. Check it against a reference and adjust it
---    afterwards (conversion guide, step 7).
+--    temperature correction starting just after its own last V1 reading (its
+--    conversion time, kept in v1_conversion), set to the same correction V1
+--    used, so temperatures carry on without a step. Stations can be reflashed
+--    at different times. Check the correction against a reference and adjust
+--    it afterwards (conversion guide, step 7).
 --  * V1 "not available" codes and other out-of-range values become NULL (gaps).
 --    Humidity that V1's scaling pushed above 100% (up to 112%) becomes 100.
 --  * V1's stored dew point is not copied; V2 calculates it.
 
 USE buildingData;
 
--- Settings. import_v1.sh sets them from V1_TEMP_SCALE and V1_RH_UNSCALE when
--- given; otherwise these defaults apply.
+-- Settings. import_v1.sh sets them from V1_TEMP_SCALE, V1_RH_UNSCALE and
+-- REPLACE_HISTORY when given; otherwise these defaults apply.
 --
 -- The V1 sketch's tempScale (near its top): V1 recorded deg F / tempScale.
 -- The same value is used for every station; a station whose sketch had a
@@ -30,6 +31,10 @@ SET @v1_temp_scale := IFNULL(@v1_temp_scale, 1.034);
 -- 1 keeps V1 humidity as V1 recorded it. The V1 rHscale (1.116) divides it
 -- back out, so the history matches V2's uncorrected humidity.
 SET @v1_rh_unscale := IFNULL(@v1_rh_unscale, 1);
+
+-- 1 deletes what V2 holds for each station up to its last V1 reading (an
+-- earlier import, or test readings) before importing.
+SET @replace_history := IFNULL(@replace_history, 0);
 
 -- Handle V1 times without shifting them: TIMESTAMP columns are read in UTC
 -- (as the export wrote them); DATETIME columns are local wall-clock times.
@@ -53,8 +58,25 @@ WHERE TRIM(location) REGEXP '^[0-9]+$'
   AND CAST(TRIM(location) AS UNSIGNED) BETWEEN 1 AND 65535
   AND recTime IS NOT NULL;
 
--- Conversion time: one second after the last V1 reading
-SET @cutover_unix := (SELECT UNIX_TIMESTAMP(MAX(recTime)) + 1 FROM v1_rows);
+-- Each station's V1 period and conversion time (one second after its last V1
+-- reading), kept for later runs. @run marks this run's stations.
+CREATE TABLE IF NOT EXISTS v1_conversion (
+  station_id   SMALLINT UNSIGNED NOT NULL PRIMARY KEY,
+  first_v1     TIMESTAMP NULL DEFAULT NULL,
+  last_v1      TIMESTAMP NULL DEFAULT NULL,
+  v1_readings  INT UNSIGNED NOT NULL DEFAULT 0,
+  converted_at TIMESTAMP NULL DEFAULT NULL,
+  imported_at  TIMESTAMP NULL DEFAULT NULL
+) ENGINE=InnoDB COMMENT='V1 history imported by migration/import_v1.sh';
+
+SET @run := UNIX_TIMESTAMP();
+INSERT INTO v1_conversion (station_id, first_v1, last_v1, v1_readings, converted_at, imported_at)
+SELECT station_id, MIN(recTime), MAX(recTime), COUNT(*),
+       FROM_UNIXTIME(UNIX_TIMESTAMP(MAX(recTime)) + 1), FROM_UNIXTIME(@run)
+FROM v1_rows GROUP BY station_id
+ON DUPLICATE KEY UPDATE first_v1 = VALUES(first_v1), last_v1 = VALUES(last_v1),
+  v1_readings = VALUES(v1_readings), converted_at = VALUES(converted_at),
+  imported_at = VALUES(imported_at);
 
 -- Stations: one per V1 station number
 INSERT IGNORE INTO stations (station_id, firmware, notes)
@@ -66,6 +88,13 @@ UPDATE stations s
 JOIN v1_import.location_names n ON TRIM(n.location) = CAST(s.station_id AS CHAR)
 SET s.name = LEFT(TRIM(n.name), 64)
 WHERE s.name IS NULL AND TRIM(n.name) <> '';
+
+-- Optionally clear each station's V1 period first (REPLACE_HISTORY=1)
+DELETE r FROM sen55_readings r
+JOIN v1_conversion c ON c.station_id = r.station_id
+WHERE @replace_history = 1 AND r.measured_at <= c.last_v1
+  AND UNIX_TIMESTAMP(c.imported_at) = @run;
+SET @replaced := ROW_COUNT();
 
 -- Readings. INSERT IGNORE skips a second reading for the same station and second.
 INSERT IGNORE INTO sen55_readings
@@ -87,17 +116,18 @@ SELECT
   IF(CO2  BETWEEN 1 AND 40000,  ROUND(CO2), NULL)
 FROM v1_rows;
 
--- V2 temperature correction for each imported station from the conversion
+-- V2 temperature correction for each imported station from its conversion
 -- time on, unless the station already has one. V1's deg F / tempScale is, in
 -- deg C: raw * (1 / tempScale) + (32 / tempScale - 32) / 1.8
 INSERT INTO station_calibration (station_id, metric, slope, offset_val, valid_from, note)
-SELECT DISTINCT r.station_id, 'temp_c',
+SELECT c.station_id, 'temp_c',
        1 / @v1_temp_scale, (32 / @v1_temp_scale - 32) / 1.8,
-       FROM_UNIXTIME(@cutover_unix),
+       c.converted_at,
        CONCAT('V2 readings from the conversion on; same as V1 tempScale ', @v1_temp_scale)
-FROM v1_rows r
-WHERE NOT EXISTS (SELECT 1 FROM station_calibration c
-                  WHERE c.station_id = r.station_id AND c.metric = 'temp_c');
+FROM v1_conversion c
+WHERE UNIX_TIMESTAMP(c.imported_at) = @run
+  AND NOT EXISTS (SELECT 1 FROM station_calibration k
+                  WHERE k.station_id = c.station_id AND k.metric = 'temp_c');
 
 -- ---------------------------------------------------------------------------
 -- Summary, in local time
@@ -105,43 +135,44 @@ WHERE NOT EXISTS (SELECT 1 FROM station_calibration c
 SET time_zone = 'SYSTEM';
 
 SELECT
-  v.station_id AS station,
+  x.station_id AS station,
   IFNULL(s.name, '(unnamed)') AS name,
-  v.v1_readings,
-  IFNULL(i.imported, 0) AS in_v2,
-  v.v1_readings - IFNULL(i.imported, 0) AS duplicates_skipped,
-  v.first_reading,
-  v.last_reading
-FROM (SELECT station_id, COUNT(*) AS v1_readings,
-             FROM_UNIXTIME(MIN(UNIX_TIMESTAMP(recTime))) AS first_reading,
-             FROM_UNIXTIME(MAX(UNIX_TIMESTAMP(recTime))) AS last_reading
-      FROM v1_rows GROUP BY station_id) v
-LEFT JOIN (SELECT station_id, COUNT(*) AS imported
-           FROM sen55_readings
-           WHERE measured_at < FROM_UNIXTIME(@cutover_unix)
-           GROUP BY station_id) i ON i.station_id = v.station_id
-LEFT JOIN stations s ON s.station_id = v.station_id
-ORDER BY v.station_id;
+  x.v1_readings,
+  x.in_v2,
+  x.v1_readings - x.in_v2 AS duplicates_skipped,
+  x.first_v1 AS first_reading,
+  x.last_v1 AS last_v1_reading,
+  x.converted_at AS conversion_time
+FROM (SELECT c.*,
+             (SELECT COUNT(*) FROM sen55_readings r
+              WHERE r.station_id = c.station_id AND r.measured_at <= c.last_v1) AS in_v2
+      FROM v1_conversion c
+      WHERE UNIX_TIMESTAMP(c.imported_at) = @run) x
+LEFT JOIN stations s ON s.station_id = x.station_id
+ORDER BY x.station_id;
 
 SELECT
   (SELECT COUNT(*) FROM v1_import.IAQ_SEN55) - (SELECT COUNT(*) FROM v1_rows)
     AS v1_rows_without_a_station_number_or_time,
-  FROM_UNIXTIME(@cutover_unix) AS conversion_time,
   IF(@v1_rh_unscale = 1, 'as V1 recorded it', CONCAT('divided by ', @v1_rh_unscale))
-    AS v1_humidity;
+    AS v1_humidity,
+  IF(@replace_history = 1, @replaced, 'kept') AS earlier_readings_replaced;
 
--- Temperature corrections that would also apply to the imported V1 readings.
--- V1 readings were already corrected, so any row listed here should start at
--- the conversion time instead.
-SELECT c.station_id AS station, c.slope, c.offset_val, c.valid_from, c.valid_to,
-       'Also applies to V1 readings: move valid_from to the conversion time' AS warning
-FROM station_calibration c
-WHERE c.metric = 'temp_c'
-  AND c.valid_from < FROM_UNIXTIME(@cutover_unix)
-  AND c.station_id IN (SELECT station_id FROM v1_rows);
+-- Temperature corrections that would also apply to V1 readings, which were
+-- already corrected. Run the command in the fix column for each row listed.
+SELECT k.station_id AS station, k.slope, k.offset_val, k.valid_from,
+       c.converted_at AS conversion_time,
+       'Also applies to V1 readings' AS warning,
+       CONCAT('sudo mariadb buildingData -e "UPDATE station_calibration SET valid_from = ''',
+              c.converted_at, ''' WHERE cal_id = ', k.cal_id, '"') AS fix
+FROM station_calibration k
+JOIN v1_conversion c ON c.station_id = k.station_id
+WHERE k.metric = 'temp_c' AND k.valid_from < c.converted_at
+  AND UNIX_TIMESTAMP(c.imported_at) = @run;
 
-SELECT c.station_id AS station, c.slope, c.offset_val, c.valid_from AS from_time,
-       ROUND((c.slope * 25 + c.offset_val - 25) * 1.8, 1) AS change_at_77F
-FROM station_calibration c
-WHERE c.metric = 'temp_c' AND c.station_id IN (SELECT station_id FROM v1_rows)
-ORDER BY c.station_id, c.valid_from;
+SELECT k.station_id AS station, k.slope, k.offset_val, k.valid_from AS from_time,
+       ROUND((k.slope * 25 + k.offset_val - 25) * 1.8, 1) AS change_at_77F
+FROM station_calibration k
+JOIN v1_conversion c ON c.station_id = k.station_id
+WHERE k.metric = 'temp_c' AND UNIX_TIMESTAMP(c.imported_at) = @run
+ORDER BY k.station_id, k.valid_from;
