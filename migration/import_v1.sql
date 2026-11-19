@@ -10,9 +10,15 @@
 --  * V2 firmware sends uncorrected readings. Each station gets a V2
 --    temperature correction starting just after its own last V1 reading (its
 --    conversion time, kept in v1_conversion), set to the same correction V1
---    used, so temperatures carry on without a step. Stations can be reflashed
---    at different times. Check the correction against a reference and adjust
---    it afterwards (conversion guide, step 7).
+--    used, so temperatures carry on without a step. It replaces the standard
+--    temperature correction a station gets when it's added. Stations can be
+--    reflashed at different times. Check the correction against a reference
+--    and adjust it afterwards (conversion guide, step 7).
+--  * Humidity uses the standard V2 correction (calibration_defaults, x1.085)
+--    from the conversion time on, close to V1's own x1.116.
+--  * Standard corrections never reach back into V1 history: any that start
+--    before a station's conversion time (from bench testing, for example) are
+--    moved to it.
 --  * V1 "not available" codes and other out-of-range values become NULL (gaps).
 --    Humidity that V1's scaling pushed above 100% (up to 112%) becomes 100.
 --  * V1's stored dew point is not copied; V2 calculates it.
@@ -27,9 +33,9 @@ USE buildingData;
 -- different one can be adjusted afterwards (conversion guide, step 7).
 SET @v1_temp_scale := IFNULL(@v1_temp_scale, 1.034);
 
--- V2 shows humidity as measured; V1 recorded it multiplied by rHscale.
--- 1 keeps V1 humidity as V1 recorded it. The V1 rHscale (1.116) divides it
--- back out, so the history matches V2's uncorrected humidity.
+-- V1 recorded humidity multiplied by rHscale (1.116). 1 keeps it as V1
+-- recorded it, which is within a few percent of V2's corrected humidity.
+-- The V1 rHscale divides it back out, if V1's factor turns out to be wrong.
 SET @v1_rh_unscale := IFNULL(@v1_rh_unscale, 1);
 
 -- 1 deletes what V2 holds for each station up to its last V1 reading (an
@@ -117,8 +123,14 @@ SELECT
 FROM v1_rows;
 
 -- V2 temperature correction for each imported station from its conversion
--- time on, unless the station already has one. V1's deg F / tempScale is, in
--- deg C: raw * (1 / tempScale) + (32 / tempScale - 32) / 1.8
+-- time on, matching V1's. It replaces the standard one the station got when it
+-- was added; a correction already set for the station is kept.
+-- V1's deg F / tempScale is, in deg C: raw * (1 / tempScale) + (32 / tempScale - 32) / 1.8
+DELETE k FROM station_calibration k
+JOIN v1_conversion c ON c.station_id = k.station_id
+WHERE UNIX_TIMESTAMP(c.imported_at) = @run
+  AND k.metric = 'temp_c' AND k.note = 'standard build';
+
 INSERT INTO station_calibration (station_id, metric, slope, offset_val, valid_from, note)
 SELECT c.station_id, 'temp_c',
        1 / @v1_temp_scale, (32 / @v1_temp_scale - 32) / 1.8,
@@ -128,6 +140,13 @@ FROM v1_conversion c
 WHERE UNIX_TIMESTAMP(c.imported_at) = @run
   AND NOT EXISTS (SELECT 1 FROM station_calibration k
                   WHERE k.station_id = c.station_id AND k.metric = 'temp_c');
+
+-- Standard corrections start at the conversion time at the earliest
+UPDATE station_calibration k
+JOIN v1_conversion c ON c.station_id = k.station_id
+SET k.valid_from = c.converted_at
+WHERE UNIX_TIMESTAMP(c.imported_at) = @run
+  AND k.note = 'standard build' AND k.valid_from < c.converted_at;
 
 -- ---------------------------------------------------------------------------
 -- Summary, in local time
@@ -158,21 +177,23 @@ SELECT
     AS v1_humidity,
   IF(@replace_history = 1, @replaced, 'kept') AS earlier_readings_replaced;
 
--- Temperature corrections that would also apply to V1 readings, which were
--- already corrected. Run the command in the fix column for each row listed.
-SELECT k.station_id AS station, k.slope, k.offset_val, k.valid_from,
+-- Corrections set for a station that would also apply to its V1 readings,
+-- which were already corrected. Run the command in the fix column for each
+-- row listed.
+SELECT k.station_id AS station, k.metric, k.slope, k.offset_val, k.valid_from,
        c.converted_at AS conversion_time,
        'Also applies to V1 readings' AS warning,
        CONCAT('sudo mariadb buildingData -e "UPDATE station_calibration SET valid_from = ''',
               c.converted_at, ''' WHERE cal_id = ', k.cal_id, '"') AS fix
 FROM station_calibration k
 JOIN v1_conversion c ON c.station_id = k.station_id
-WHERE k.metric = 'temp_c' AND k.valid_from < c.converted_at
+WHERE k.metric IN ('temp_c', 'rh') AND k.valid_from < c.converted_at
   AND UNIX_TIMESTAMP(c.imported_at) = @run;
 
-SELECT k.station_id AS station, k.slope, k.offset_val, k.valid_from AS from_time,
-       ROUND((k.slope * 25 + k.offset_val - 25) * 1.8, 1) AS change_at_77F
+SELECT k.station_id AS station, k.metric, k.slope, k.offset_val, k.valid_from AS from_time,
+       IF(k.metric = 'temp_c', ROUND((k.slope * 25 + k.offset_val - 25) * 1.8, 1), NULL) AS change_at_77F,
+       IF(k.metric = 'rh', ROUND(k.slope * 50 + k.offset_val, 1), NULL) AS rh_50_shows_as
 FROM station_calibration k
 JOIN v1_conversion c ON c.station_id = k.station_id
-WHERE k.metric = 'temp_c' AND UNIX_TIMESTAMP(c.imported_at) = @run
-ORDER BY k.station_id, k.valid_from;
+WHERE k.metric IN ('temp_c', 'rh') AND UNIX_TIMESTAMP(c.imported_at) = @run
+ORDER BY k.station_id, k.metric, k.valid_from;

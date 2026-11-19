@@ -36,8 +36,11 @@ CREATE TABLE stations (
 -- ---------------------------------------------------------------------------
 -- 2. Calibration, with the period each value applies to
 --    corrected = raw * slope + offset_val
---    metric: 'temp_c'  enclosure self-heating, in deg C (temperature only;
---                      humidity is shown as measured)
+--    metric: 'temp_c'  enclosure self-heating, in deg C
+--            'rh'      humidity, % (the humidity sensor runs warm too, but
+--                      less than the temperature reading suggests, so it
+--                      gets its own correction rather than one derived
+--                      from temp_c)
 --            'pm'      all four PM sizes
 --            'hcho'    SFA30 formaldehyde, ppb
 --            'co2'     SCD40, ppm
@@ -56,9 +59,37 @@ CREATE TABLE station_calibration (
   note        VARCHAR(128)  NULL,
   PRIMARY KEY (cal_id),
   KEY idx_lookup (station_id, metric, valid_from),
-  CONSTRAINT chk_cal_metric CHECK (metric IN ('temp_c', 'pm', 'hcho', 'co2')),
+  CONSTRAINT chk_cal_metric CHECK (metric IN ('temp_c', 'rh', 'pm', 'hcho', 'co2')),
   CONSTRAINT fk_cal_station FOREIGN KEY (station_id) REFERENCES stations (station_id)
 ) ENGINE=InnoDB;
+
+-- Standard corrections for the station build. A new station gets its own copy
+-- of each, noted 'standard build', starting at its first reading (the trigger
+-- below). Change a station's own row to override it; see section 6 for
+-- changing the standard itself.
+-- Values from station 1 against an Aranet4, 2026-11-16 to 11-19 (30-minute
+-- means): temperature 3.55 C high, humidity x1.085 (rms 1.4 points).
+CREATE TABLE calibration_defaults (
+  metric      VARCHAR(16)   NOT NULL,
+  slope       DECIMAL(8,5)  NOT NULL DEFAULT 1,
+  offset_val  DECIMAL(8,3)  NOT NULL DEFAULT 0,
+  note        VARCHAR(128)  NULL,
+  PRIMARY KEY (metric),
+  CONSTRAINT chk_default_metric CHECK (metric IN ('temp_c', 'rh', 'pm', 'hcho', 'co2'))
+) ENGINE=InnoDB;
+
+INSERT INTO calibration_defaults (metric, slope, offset_val, note) VALUES
+  ('temp_c', 1,     -3.6, 'enclosure self-heating'),
+  ('rh',     1.085,  0,   'humidity sensor runs warm');
+
+-- Runs when a station first posts (or is added any other way). Starts at the
+-- moment the station is added, so it never reaches back into readings from
+-- before it was registered, such as a converted site's V1 history.
+CREATE TRIGGER stations_standard_calibration
+AFTER INSERT ON stations FOR EACH ROW
+  INSERT INTO station_calibration (station_id, metric, slope, offset_val, valid_from, note)
+  SELECT NEW.station_id, d.metric, d.slope, d.offset_val, NOW(), 'standard build'
+  FROM calibration_defaults d;
 
 -- ---------------------------------------------------------------------------
 -- 3. Readings: raw values plus station health
@@ -104,6 +135,7 @@ SELECT
   r.temp_c AS temp_c_raw,
   r.rh     AS rh_raw,
   IF(ct.cal_id IS NULL, r.temp_c, r.temp_c * ct.slope + ct.offset_val) AS temp_c,
+  IF(cr.cal_id IS NULL, r.rh, LEAST(100, GREATEST(0, r.rh * cr.slope + cr.offset_val))) AS rh,
   IF(cp.cal_id IS NULL, r.pm1,  r.pm1  * cp.slope + cp.offset_val) AS pm1,
   IF(cp.cal_id IS NULL, r.pm25, r.pm25 * cp.slope + cp.offset_val) AS pm25,
   IF(cp.cal_id IS NULL, r.pm4,  r.pm4  * cp.slope + cp.offset_val) AS pm4,
@@ -120,6 +152,9 @@ JOIN stations s ON s.station_id = r.station_id
 LEFT JOIN station_calibration ct
   ON ct.station_id = r.station_id AND ct.metric = 'temp_c'
  AND r.measured_at >= ct.valid_from AND (ct.valid_to IS NULL OR r.measured_at < ct.valid_to)
+LEFT JOIN station_calibration cr
+  ON cr.station_id = r.station_id AND cr.metric = 'rh'
+ AND r.measured_at >= cr.valid_from AND (cr.valid_to IS NULL OR r.measured_at < cr.valid_to)
 LEFT JOIN station_calibration cp
   ON cp.station_id = r.station_id AND cp.metric = 'pm'
  AND r.measured_at >= cp.valid_from AND (cp.valid_to IS NULL OR r.measured_at < cp.valid_to)
@@ -133,19 +168,16 @@ LEFT JOIN station_calibration cc
 -- What the dashboard reads: the same column names and units as the old
 -- IAQ_SEN55 table (temp and DP in deg F). If the dashboard expects a different
 -- name for the timestamp column, change the measured_at alias here.
---  * Temperature has each station's correction applied.
---  * Humidity is shown as the SEN55 reports it. The temperature correction
---    does not change it: against a reference meter, the SEN55's humidity
---    matches the room even while its temperature reads high.
+--  * Temperature and humidity have each station's corrections applied.
 --  * Dew point is calculated (Magnus formula) from the corrected temperature
---    and the humidity shown, so all three agree with each other.
+--    and corrected humidity, so all three agree with each other.
 CREATE OR REPLACE ALGORITHM = MERGE VIEW sen55_display AS
 SELECT
   c.station_id AS location,
   c.station_name,
   c.measured_at,
   ROUND(c.temp_c * 1.8 + 32, 1) AS temp,
-  ROUND(c.rh_raw, 1) AS rH,
+  ROUND(c.rh, 1) AS rH,
   ROUND(c.pm1, 1)  AS pmass1,
   ROUND(c.pm25, 1) AS pmass25,
   ROUND(c.pm4, 1)  AS pmass4,
@@ -154,9 +186,9 @@ SELECT
   c.nox AS NOx,
   ROUND(c.hcho, 1) AS HCHO,
   ROUND(c.co2, 0)  AS CO2,
-  ROUND(IF(c.rh_raw > 0,
-           243.12 * (LN(c.rh_raw / 100) + 17.62 * c.temp_c / (243.12 + c.temp_c))
-             / (17.62 - (LN(c.rh_raw / 100) + 17.62 * c.temp_c / (243.12 + c.temp_c))),
+  ROUND(IF(c.rh > 0,
+           243.12 * (LN(c.rh / 100) + 17.62 * c.temp_c / (243.12 + c.temp_c))
+             / (17.62 - (LN(c.rh / 100) + 17.62 * c.temp_c / (243.12 + c.temp_c))),
            NULL) * 1.8 + 32, 1) AS DP
 FROM sen55_corrected c;
 
@@ -223,14 +255,22 @@ GRANT UPDATE (name) ON buildingData.stations TO 'iaq_dashboard'@'localhost';
 -- 6. Per-site setup, run after a card made from the image is installed.
 --    Leave these out of the master image so it holds no site data.
 -- ---------------------------------------------------------------------------
--- Stations register on their first post; name them from the dashboard.
+-- Stations register on their first post and get the standard corrections
+-- (section 2) from their first reading; name them from the dashboard.
 --
--- Temperature correction for each station: the offset is a reference
--- thermometer's reading in deg C minus the station's raw temp_c averaged over
--- the same 30 minutes (about -3.6 on the first V2 station). Set valid_from to
--- when the station was installed to correct its readings from the start:
---   INSERT INTO station_calibration (station_id, metric, offset_val, valid_from, note)
---   VALUES (1, 'temp_c', -3.6, '2026-11-16 19:30:00', 'vs reference thermometer');
+-- To set one station's temperature from a reference instead, the offset is
+-- the reference's reading in deg C minus the station's raw temp_c averaged
+-- over the same 30 minutes:
+--   UPDATE station_calibration SET slope = 1, offset_val = -3.2, note = 'vs reference'
+--    WHERE station_id = 1 AND metric = 'temp_c' AND valid_to IS NULL;
+-- Humidity the same way, as a factor: the reference's RH / the raw rh.
+-- Any note other than 'standard build' marks the row as set for that station.
+--
+-- To change the standard: update calibration_defaults for stations added from
+-- now on, and the rows of stations still on it:
+--   UPDATE calibration_defaults SET slope = 1.09 WHERE metric = 'rh';
+--   UPDATE station_calibration SET slope = 1.09
+--    WHERE metric = 'rh' AND note = 'standard build';
 --
 -- To change a calibration from a given time onward, close the current row and
 -- add a new one:

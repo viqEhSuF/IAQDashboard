@@ -49,11 +49,15 @@ Then reflash each station with the V2 firmware, keeping its V1 station number.
   temperature for 1.034). If the V1 sketches used a different `tempScale`,
   give it as `V1_TEMP_SCALE=...` after `sudo`. Check the correction against a
   reference afterwards.
-- **Humidity will step down at the conversion** unless you choose otherwise.
-  V2 shows humidity as measured; V1 multiplied it by `rHscale` (1.116), so V2
-  reads about a tenth lower than V1 did for the same air (50% becomes about
-  45%). To divide V1's scaling back out of the history instead, so it matches
-  V2, run the import with `sudo V1_RH_UNSCALE=1.116 bash import_v1.sh ...`.
+- **Humidity carries on too.** V2 applies the standard humidity correction
+  (×1.085, in `calibration_defaults`) from each station's conversion, close to
+  V1's own ×1.116, so V2 reads about 3% lower than V1 did for the same air
+  (50% becomes about 48.6%). If V1's factor turns out to be wrong, the import
+  can divide it out of the history: `sudo V1_RH_UNSCALE=1.116 bash import_v1.sh ...`.
+- **Standard corrections stay out of V1 history.** A station added to V2
+  before its conversion (bench testing, for example) has its standard
+  corrections moved to its conversion time, and its standard temperature
+  correction is replaced by V1's.
 - **Gaps stay gaps.** V1's "not available" codes (PM 6554, VOC 3277, RH 366,
   CO2 0, and similar) and other impossible values become empty readings.
   Humidity that V1's scaling pushed over 100% (up to 112%) is stored as 100.

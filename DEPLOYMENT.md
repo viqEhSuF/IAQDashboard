@@ -374,7 +374,7 @@ bun run deploy
 | API returns 500 | `sudo journalctl -u sensor-api -n 50` — look for SQL errors (wrong column names, missing table) |
 | No locations appear | No station has posted yet. Check the station's serial monitor for `Server: HTTP/1.1 200 OK`, and `sudo grep "IAQ ingest" /var/log/apache2/error.log` |
 | Station shows Offline | It has not reported for over 10 minutes: check its power and WiFi |
-| Temperatures read a few degrees high | The station has no `temp_c` calibration row yet; see section 6 of `database/iaq_schema.sql` |
+| Temperatures read a few degrees high, or humidity a few points low | The station has no correction rows. New stations get the standard ones automatically; a system set up before 2026-11-19 needs `database/updates/2026-11-19-standard-corrections.sql`. See section 6 of `database/iaq_schema.sql` to set a station's own values |
 | `go: command not found` | Re-run `source ~/.bashrc` or log out and back in |
 | `bun: command not found` | Re-run `source ~/.bashrc` or log out and back in |
 | `cp: Text file busy` when copying sensor-api | Stop the service first: `sudo systemctl stop sensor-api`, then copy, then start |
