@@ -222,7 +222,10 @@ Then on the Pi:
 ```bash
 sudo cp -r ~/dashboard-build/* /var/www/html/
 rm -rf ~/dashboard-build
+sudo bash ~/IAQDashboard/update.sh --frontend-copied
 ```
+
+The last command tells the daily updater this version of the dashboard is installed, so it stops asking for it. Build from the same commit the Pi is on (`git -C ~/IAQDashboard log --oneline -1`).
 
 Copying the files doesn't remove `iaq_ingest.php`, which also lives in
 `/var/www/html/`.
@@ -244,14 +247,12 @@ Copying the files doesn't remove `iaq_ingest.php`, which also lives in
 
 ## Automatic daily updates
 
-The repository includes `update.sh`, which checks for upstream changes once per day and rebuilds only what changed. Set it up with a systemd timer:
+The repository includes `update.sh`, which checks for upstream changes once per day and installs what changed: the API, the dashboard and the ingest script. It records each part as installed (in `/var/lib/iaq-update`) only once its build and install succeed, so a part that failed is tried again on the next run. Git and the builds run as the owner of `~/IAQDashboard`, so no root-owned files end up there. Set it up with a systemd timer:
 
-**1 — Make the script executable and allow root to run git in the repo:**
+**1 — Make the script executable:**
 ```bash
 chmod +x ~/IAQDashboard/update.sh
-sudo git config --system --add safe.directory ~/IAQDashboard
 ```
-The second command writes to `/etc/gitconfig` so that the service (which runs as root) can run git commands in a directory owned by your regular user. This is a one-time step.
 
 **2 — Create the systemd service** (`/etc/systemd/system/iaq-update.service`):
 
@@ -309,10 +310,12 @@ sudo systemctl start iaq-update.timer
 systemctl list-timers iaq-update.timer
 ```
 
-**To trigger an update immediately** (useful for testing):
+**To update immediately**, either through the service (output goes to the log) or directly (output on screen):
 ```bash
 sudo systemctl start iaq-update.service
+sudo bash ~/IAQDashboard/update.sh
 ```
+It must run as root. `sudo bash ~/IAQDashboard/update.sh --all` rebuilds and reinstalls everything, whatever is recorded as installed. After an update that changes the dashboard, reload any dashboard page that was already open.
 
 **To view the update log:**
 ```bash
