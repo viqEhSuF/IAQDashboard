@@ -536,13 +536,14 @@ func main() {
 	r.HandleFunc("/api/sensor-data", handleGetSensorData).Methods("GET")
 	r.HandleFunc("/api/sensor-data/latest", handleGetLatestSensorData).Methods("GET")
 	r.HandleFunc("/api/station-health", handleGetStationHealth).Methods("GET")
+	r.HandleFunc("/api/export", handleExport).Methods("GET")
 
 	// Add CORS support
 	c := cors.New(cors.Options{
 		AllowedOrigins:   []string{"*"}, // Adjust this for production
 		AllowedMethods:   []string{"GET", "PUT", "DELETE"},
 		AllowedHeaders:   []string{"Content-Type", "Authorization"},
-		ExposedHeaders:   []string{"X-Resolution-Seconds"},
+		ExposedHeaders:   []string{"X-Resolution-Seconds", "Content-Disposition"},
 		AllowCredentials: true,
 	})
 

@@ -558,7 +558,10 @@
     { label: 'CO₂',         field: 'CO2',      decimals: 0 },
     { label: 'Humidity',    field: 'rH',       decimals: 0 },
     { label: 'VOC Index',   field: 'VOC',      decimals: 0 },
+    { label: 'PM1.0',       field: 'pmass1',   decimals: 1 },
     { label: 'PM2.5',       field: 'pmass25',  decimals: 1 },
+    { label: 'PM4.0',       field: 'pmass4',   decimals: 1 },
+    { label: 'PM10',        field: 'pmass10',  decimals: 1 },
     { label: 'NOx Index',   field: 'NOx',      decimals: 0 },
     { label: 'HCHO',        field: 'HCHO',     decimals: 1 },
     { label: 'Dew Point',   field: 'indoorTd', decimals: 0 },
@@ -601,8 +604,55 @@
   let overlayResolution = REPORT_SECONDS;
   let overlayWindow: [number, number] | null = null;
 
+  // ── Export ─────────────────────────────────────────────────────────────
+
+  // The overlay's locations and metrics as a CSV file, for the selected date
+  // range or the zoom window, as every reading or as averages (seconds)
+  const EXPORT_DETAIL = [
+    { seconds: 120,   label: 'Every reading' },
+    { seconds: 300,   label: '5-minute averages' },
+    { seconds: 900,   label: '15-minute averages' },
+    { seconds: 3600,  label: 'Hourly averages' },
+    { seconds: 86400, label: 'Daily averages' }
+  ];
+  let exportDetail = 120;
+
+  $: exportMetricFields = [...new Set([...overlayMetrics, ...overlayMetricsRight])];
+  $: exportRangeText = describeExportRange(zoomRange, startDate, startHour, endDate, endHour);
+
+  function describeExportRange(zoom: [number, number] | null, sd: string, sh: number, ed: string, eh: number): string {
+    if (zoom) return describeZoom(zoom);
+    if (!sd && !ed) return 'all data';
+    const p = (n: number) => n.toString().padStart(2, '0');
+    const from = sd ? new Date(`${sd}T${p(sh)}:00:00`).getTime() : NaN;
+    const to = ed ? new Date(`${ed}T${p(eh)}:59:59`).getTime() : Date.now();
+    const dated = { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' } as const;
+    return sd ? describeZoom([from, to]) : `the first reading to ${new Date(to).toLocaleString(undefined, dated)}`;
+  }
+
+  function exportCsv() {
+    const url = new URL(getApiUrl('export'), window.location.origin);
+    for (const loc of overlayLocations) url.searchParams.append('location', loc);
+    for (const field of exportMetricFields) url.searchParams.append('metric', String(field));
+    url.searchParams.append('interval', String(exportDetail));
+    if (zoomRange) {
+      url.searchParams.append('startDate', localDateTime(zoomRange[0]));
+      url.searchParams.append('endDate', localDateTime(zoomRange[1]));
+    } else {
+      if (startDate) url.searchParams.append('startDate', `${startDate}T${startHour.toString().padStart(2, '0')}:00:00`);
+      if (endDate)   url.searchParams.append('endDate',   `${endDate}T${endHour.toString().padStart(2, '0')}:59:59`);
+    }
+    // The server sends the file as a download, named for the date range
+    const a = document.createElement('a');
+    a.href = url.toString();
+    a.download = '';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  }
+
   async function generateOverlay(win: [number, number] | null = null) {
-    if (overlayLocations.length === 0 || overlayMetrics.length === 0) return;
+    if (overlayLocations.length === 0 || (overlayMetrics.length === 0 && overlayMetricsRight.length === 0)) return;
     overlayLoading = true;
     overlayError = null;
     overlaySeries = [];
@@ -1037,7 +1087,7 @@
           </div>
         </div>
 
-        <div class="flex items-center gap-3 pb-5 border-b border-gray-100">
+        <div class="flex flex-wrap items-center gap-3 pb-5 border-b border-gray-100">
           <button
             on:click={() => generateOverlay(zoomRange)}
             disabled={overlayLocations.length === 0 || (overlayMetrics.length === 0 && overlayMetricsRight.length === 0) || overlayLoading}
@@ -1054,6 +1104,28 @@
               · {overlayLocations.length * (overlayMetrics.length + overlayMetricsRight.length)} series
             {/if}
           </span>
+          <div class="flex flex-wrap items-center gap-2 sm:ml-auto">
+            <label for="export-detail" class="text-sm text-gray-600">Export</label>
+            <select id="export-detail" bind:value={exportDetail}
+              class="border border-gray-200 rounded-lg px-2 py-1.5 text-sm text-gray-700 bg-white">
+              {#each EXPORT_DETAIL as d}
+                <option value={d.seconds}>{d.label}</option>
+              {/each}
+            </select>
+            <button
+              on:click={exportCsv}
+              disabled={overlayLocations.length === 0 || exportMetricFields.length === 0}
+              title="Selected locations and metrics, {exportRangeText}"
+              class="px-4 py-2 rounded-lg text-sm font-semibold border border-slate-300 text-slate-700 hover:bg-slate-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              Export CSV
+            </button>
+          </div>
+          {#if overlayLocations.length > 0 && exportMetricFields.length > 0}
+            <p class="w-full text-xs text-gray-400">
+              Export covers {exportRangeText}{zoomRange ? ' (the zoomed window)' : ''}, one row per station and {exportDetail === 120 ? 'reading' : 'interval'}.
+            </p>
+          {/if}
         </div>
 
         <div class="mt-5">
