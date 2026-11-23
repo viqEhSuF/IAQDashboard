@@ -219,10 +219,104 @@ func GetLocations() ([]LocationData, error) {
 }
 
 // GetSensorData retrieves sensor data from the database with optional filtering
-func GetSensorData(limit int, startDate, endDate string, location int) ([]SensorData, error) {
+// Charts get at most about this many points per station. A longer range is
+// averaged into fixed intervals so the whole range fits, instead of losing its
+// oldest readings to the row limit; zooming in fetches the shorter window at
+// full detail.
+const maxPointsPerStation = 3000
+
+// Stations report every 2 minutes
+const reportSeconds = 120
+
+// Interval lengths a long range is averaged into, in seconds
+var averagingSteps = []int{300, 600, 900, 1800, 3600, 7200, 10800, 21600, 43200, 86400}
+
+// resolutionFor returns the interval to average a range into: reportSeconds
+// (no averaging) when the whole range fits at full detail.
+func resolutionFor(start, end time.Time) int {
+	span := end.Sub(start).Seconds()
+	if span <= float64(maxPointsPerStation*reportSeconds) {
+		return reportSeconds
+	}
+	need := span / maxPointsPerStation
+	for _, step := range averagingSteps {
+		if float64(step) >= need {
+			return step
+		}
+	}
+	return averagingSteps[len(averagingSteps)-1]
+}
+
+// parseRangeTime reads a startDate/endDate parameter as local time
+func parseRangeTime(s string) (time.Time, bool) {
+	for _, layout := range []string{"2006-01-02T15:04:05", "2006-01-02 15:04:05", "2006-01-02T15:04", "2006-01-02"} {
+		if t, err := time.ParseInLocation(layout, s, time.Local); err == nil {
+			return t, true
+		}
+	}
+	return time.Time{}, false
+}
+
+// earliestReading is the time of the first reading for a station (0 = all)
+func earliestReading(location int) (time.Time, bool) {
+	var t sql.NullTime
+	var err error
+	if location > 0 {
+		err = db.Get(&t, "SELECT MIN(measured_at) FROM sen55_readings WHERE station_id = ?", location)
+	} else {
+		err = db.Get(&t, "SELECT MIN(measured_at) FROM sen55_readings")
+	}
+	if err != nil || !t.Valid {
+		return time.Time{}, false
+	}
+	return t.Time, true
+}
+
+// rangeResolution works out the averaging interval for a sensor-data request
+func rangeResolution(startDate, endDate string, location int) int {
+	end := time.Now()
+	if endDate != "" {
+		t, ok := parseRangeTime(endDate)
+		if !ok {
+			return reportSeconds
+		}
+		end = t
+	}
+	var start time.Time
+	if startDate != "" {
+		t, ok := parseRangeTime(startDate)
+		if !ok {
+			return reportSeconds
+		}
+		start = t
+	} else {
+		t, ok := earliestReading(location)
+		if !ok {
+			return reportSeconds
+		}
+		start = t
+	}
+	return resolutionFor(start, end)
+}
+
+// GetSensorData returns readings for a time range, newest first. With
+// resolution above reportSeconds, each station's readings are averaged over
+// intervals of that many seconds (on local clock time); each point is placed
+// at the average time of the readings in it.
+func GetSensorData(limit int, startDate, endDate string, location, resolution int) ([]SensorData, error) {
 	query := `SELECT CAST(location AS CHAR) AS location, measured_at AS recTime,
 	                 temp, rH, VOC, NOx, pmass1, pmass25, pmass4, pmass10, HCHO, CO2, DP
 	          FROM sen55_display`
+	if resolution > reportSeconds {
+		query = `SELECT CAST(location AS CHAR) AS location,
+		                FROM_UNIXTIME(ROUND(AVG(UNIX_TIMESTAMP(measured_at)))) AS recTime,
+		                ROUND(AVG(temp), 2) AS temp, ROUND(AVG(rH), 2) AS rH,
+		                ROUND(AVG(VOC), 2) AS VOC, ROUND(AVG(NOx), 2) AS NOx,
+		                ROUND(AVG(pmass1), 2) AS pmass1, ROUND(AVG(pmass25), 2) AS pmass25,
+		                ROUND(AVG(pmass4), 2) AS pmass4, ROUND(AVG(pmass10), 2) AS pmass10,
+		                ROUND(AVG(HCHO), 2) AS HCHO, ROUND(AVG(CO2), 1) AS CO2, ROUND(AVG(DP), 2) AS DP
+		         FROM sen55_display`
+	}
 	conditions := []string{}
 	args := []interface{}{}
 
@@ -247,8 +341,13 @@ func GetSensorData(limit int, startDate, endDate string, location int) ([]Sensor
 		query += " WHERE " + strings.Join(conditions, " AND ")
 	}
 
-	// Add sorting and limit
-	query += " ORDER BY measured_at DESC LIMIT ?"
+	// Add grouping, sorting and limit. resolution is one of averagingSteps,
+	// never user text, so it is safe to put in the query.
+	if resolution > reportSeconds {
+		query += fmt.Sprintf(" GROUP BY location, FLOOR(TO_SECONDS(measured_at) / %d) ORDER BY recTime DESC LIMIT ?", resolution)
+	} else {
+		query += " ORDER BY measured_at DESC LIMIT ?"
+	}
 	args = append(args, limit)
 
 	// Execute the query. Start from an empty list so no rows encodes as []
@@ -328,15 +427,18 @@ func handleGetSensorData(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("Fetching data with range: %s to %s, location: %q, limit: %d", startDate, endDate, locationStr, limit)
 
+	// Long ranges come back averaged so the whole range fits under the limit
+	resolution := rangeResolution(startDate, endDate, location)
+
 	// Get data from database
-	data, err := GetSensorData(limit, startDate, endDate, location)
+	data, err := GetSensorData(limit, startDate, endDate, location, resolution)
 	if err != nil {
 		log.Printf("Error fetching sensor data: %v", err)
 		http.Error(w, "Failed to fetch sensor data", http.StatusInternalServerError)
 		return
 	}
 
-	log.Printf("Returned %d records", len(data))
+	log.Printf("Returned %d records at %d s resolution", len(data), resolution)
 
 	// Add tag support - for demo, just add a tag based on temperature
 	for i := range data {
@@ -355,6 +457,8 @@ func handleGetSensorData(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Set content type header
+	// Seconds each point covers: 120 is every reading, more is averaged
+	w.Header().Set("X-Resolution-Seconds", strconv.Itoa(resolution))
 	w.Header().Set("Content-Type", "application/json")
 
 	// Return as JSON
@@ -379,7 +483,7 @@ func handleGetLatestSensorData(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get latest data from database
-	data, err := GetSensorData(limit, "", "", 0)
+	data, err := GetSensorData(limit, "", "", 0, reportSeconds)
 	if err != nil {
 		log.Printf("Error fetching latest sensor data: %v", err)
 		http.Error(w, "Failed to fetch latest sensor data", http.StatusInternalServerError)
@@ -438,6 +542,7 @@ func main() {
 		AllowedOrigins:   []string{"*"}, // Adjust this for production
 		AllowedMethods:   []string{"GET", "PUT", "DELETE"},
 		AllowedHeaders:   []string{"Content-Type", "Authorization"},
+		ExposedHeaders:   []string{"X-Resolution-Seconds"},
 		AllowCredentials: true,
 	})
 

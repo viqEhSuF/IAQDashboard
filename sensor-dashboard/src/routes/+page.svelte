@@ -189,7 +189,7 @@
   }
 
   function selectPreset(hours: number) {
-    zoomRange = null;
+    clearZoom();
     presetHours = hours;
     applyPreset(hours);
     fetchData();
@@ -273,6 +273,7 @@
       const data = (await response.json()) ?? [];
       if (seq !== fetchSeq) return;  // a newer request replaced this one
       sensorData = data;
+      resolutionSec = readResolution(response);
       updateCharts();
       error = null;
       refreshFailed = false;
@@ -292,14 +293,14 @@
 
   // Handle date input changes: a range picked by hand stays where it is
   function handleDateChange() {
-    zoomRange = null;
+    clearZoom();
     presetHours = null;
     fetchData();
   }
 
   // Reset date filters and fetch all data
   function resetDateFilters() {
-    zoomRange = null;
+    clearZoom();
     presetHours = null;
     startDate = '';
     endDate = '';
@@ -310,13 +311,14 @@
   
   // Update all chart data
   function updateCharts() {
-    tempChart = createTimeSeriesData(sensorData, 'temp');
-    co2Chart = createTimeSeriesData(sensorData, 'CO2');
-    humidityChart = createTimeSeriesData(sensorData, 'rH');
-    vocChart = createTimeSeriesData(sensorData, 'VOC');
-    noxChart = createTimeSeriesData(sensorData, 'NOx');
-    hchoChart = createTimeSeriesData(sensorData, 'HCHO');
-    dpChart = createTimeSeriesData(sensorData, 'indoorTd');
+    const src = zoomData ?? sensorData;
+    tempChart = createTimeSeriesData(src, 'temp');
+    co2Chart = createTimeSeriesData(src, 'CO2');
+    humidityChart = createTimeSeriesData(src, 'rH');
+    vocChart = createTimeSeriesData(src, 'VOC');
+    noxChart = createTimeSeriesData(src, 'NOx');
+    hchoChart = createTimeSeriesData(src, 'HCHO');
+    dpChart = createTimeSeriesData(src, 'indoorTd');
   }
   
   // Decimal places each measure is shown with. Values are rounded to this
@@ -346,16 +348,91 @@
   // ── Zoom ───────────────────────────────────────────────────────────────
 
   // Time window [start, end] in ms chosen by dragging across a chart. It
-  // applies to every chart, so they stay lined up; the readings already loaded
-  // are filtered, nothing is fetched. Cleared when the station or range changes.
+  // applies to every chart, so they stay lined up. When the range on screen
+  // was averaged, the window is fetched again at the finest detail the API
+  // gives for it. Cleared when the station or range changes.
+  // Stations report every 2 minutes: the API's finest detail
+  const REPORT_SECONDS = 120;
+
   let zoomRange: [number, number] | null = null;
+  let zoomData: NormalizedSensorData[] | null = null;
+  let zoomResolution = REPORT_SECONDS;
+  let zoomSeq = 0;
 
   function zoomTo(range: [number, number]) {
     zoomRange = range;
+    if (resolutionSec > REPORT_SECONDS && selectedLocation !== null) loadZoomDetail(selectedLocation, range);
+    if (overlaySeries.length > 0 && overlayResolution > REPORT_SECONDS) generateOverlay(range);
+  }
+
+  async function loadZoomDetail(loc: string, range: [number, number]) {
+    const seq = ++zoomSeq;
+    try {
+      const { data, resolution } = await fetchRange(loc, range);
+      if (seq !== zoomSeq) return;  // zoomed again, or reset, meanwhile
+      zoomData = data;
+      zoomResolution = resolution;
+      updateCharts();
+    } catch (err) {
+      console.error('Error fetching zoom detail:', err);  // the averaged readings stay up
+    }
+  }
+
+  // Drops the zoom and its detail; the caller fetches or redraws
+  function clearZoom() {
+    zoomRange = null;
+    zoomData = null;
+    zoomSeq++;
+    if (overlayWindow) generateOverlay();
   }
 
   function resetZoom() {
-    zoomRange = null;
+    const hadDetail = zoomData !== null;
+    clearZoom();
+    if (hadDetail) updateCharts();
+  }
+
+  // ── Averaged ranges ────────────────────────────────────────────────────
+
+  // For longer ranges the API averages readings over a longer interval than
+  // REPORT_SECONDS so the whole range fits, and says how long in the
+  // X-Resolution-Seconds header.
+  let resolutionSec = REPORT_SECONDS;
+
+  function readResolution(res: Response): number {
+    return Number(res.headers.get('X-Resolution-Seconds')) || REPORT_SECONDS;
+  }
+
+  // "15-minute", "3-hour", "1-day"
+  function resolutionLabel(sec: number): string {
+    if (sec % 86400 === 0) return `${sec / 86400}-day`;
+    if (sec % 3600 === 0) return `${sec / 3600}-hour`;
+    return `${Math.round(sec / 60)}-minute`;
+  }
+
+  $: shownResolution = zoomRange && zoomData ? zoomResolution : resolutionSec;
+
+  // YYYY-MM-DDTHH:MM:SS in local time, as the API takes it
+  function localDateTime(ms: number): string {
+    const d = new Date(ms);
+    const p = (n: number) => String(n).padStart(2, '0');
+    return `${localDate(d)}T${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+  }
+
+  // One station's readings for a window, or for the selected date range
+  async function fetchRange(loc: string, win: [number, number] | null = null) {
+    const url = new URL(getApiUrl('sensor-data'), window.location.origin);
+    url.searchParams.append('location', loc);
+    if (win) {
+      url.searchParams.append('startDate', localDateTime(win[0]));
+      url.searchParams.append('endDate', localDateTime(win[1]));
+    } else {
+      if (startDate) url.searchParams.append('startDate', `${startDate}T${startHour.toString().padStart(2, '0')}:00:00`);
+      if (endDate)   url.searchParams.append('endDate',   `${endDate}T${endHour.toString().padStart(2, '0')}:59:59`);
+    }
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`HTTP ${res.status} for location ${loc}`);
+    return { data: ((await res.json()) ?? []) as NormalizedSensorData[], resolution: readResolution(res) };
   }
 
   $: tempShown     = inZoom(tempChart, zoomRange);
@@ -379,7 +456,7 @@
   ];
   let pmField: PmField = 'pmass25';
   $: pmSize = PM_SIZES.find(s => s.field === pmField) ?? PM_SIZES[1];
-  $: pmassChart = createTimeSeriesData(sensorData, pmField);
+  $: pmassChart = createTimeSeriesData(zoomData ?? sensorData, pmField);
   $: noxShown      = inZoom(noxChart, zoomRange);
   $: hchoShown     = inZoom(hchoChart, zoomRange);
   $: dpShown       = inZoom(dpChart, zoomRange);
@@ -519,23 +596,22 @@
     return metricLabel;
   }
 
-  async function generateOverlay() {
+  // Resolution of the overlay's readings, and the zoom window they were
+  // fetched for (null = the selected date range)
+  let overlayResolution = REPORT_SECONDS;
+  let overlayWindow: [number, number] | null = null;
+
+  async function generateOverlay(win: [number, number] | null = null) {
     if (overlayLocations.length === 0 || overlayMetrics.length === 0) return;
     overlayLoading = true;
     overlayError = null;
     overlaySeries = [];
+    overlayWindow = win;
     try {
       const results = await Promise.all(
-        overlayLocations.map(async loc => {
-          const url = new URL(getApiUrl('sensor-data'), window.location.origin);
-          url.searchParams.append('location', loc);
-          if (startDate) url.searchParams.append('startDate', `${startDate}T${startHour.toString().padStart(2, '0')}:00:00`);
-          if (endDate)   url.searchParams.append('endDate',   `${endDate}T${endHour.toString().padStart(2, '0')}:59:59`);
-          const res = await fetch(url);
-          if (!res.ok) throw new Error(`HTTP ${res.status} for location ${loc}`);
-          return { loc, data: ((await res.json()) ?? []) as NormalizedSensorData[] };
-        })
+        overlayLocations.map(async loc => ({ loc, ...(await fetchRange(loc, win)) }))
       );
+      overlayResolution = Math.max(REPORT_SECONDS, ...results.map(r => r.resolution));
       let colorIdx = 0;
       const built: typeof overlaySeries = [];
       for (const { loc, data } of results) {
@@ -609,7 +685,7 @@
       </div>
       {#if !loading && sensorData.length > 0}
         <div class="text-right hidden sm:block">
-          <div class="text-white font-semibold">{sensorData.length.toLocaleString()} readings</div>
+          <div class="text-white font-semibold">{sensorData.length.toLocaleString()} {resolutionSec > REPORT_SECONDS ? 'averages' : 'readings'}</div>
           <div class="text-slate-400 text-sm">
             {new Date(sensorData[sensorData.length - 1].recTime).toLocaleDateString()} – {new Date(sensorData[0].recTime).toLocaleDateString()}
           </div>
@@ -640,7 +716,7 @@
             {:else}
               <div class="group flex items-center gap-0.5">
                 <button
-                  on:click={() => { selectedLocation = loc.location; zoomRange = null; fetchData(); }}
+                  on:click={() => { selectedLocation = loc.location; clearZoom(); fetchData(); }}
                   class="px-4 py-1.5 rounded-full text-sm font-medium transition-colors {selectedLocation === loc.location ? 'bg-slate-700 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}"
                 >
                   {locationLabel(loc.location)}
@@ -786,7 +862,7 @@
       <!-- Summary bar -->
       <div class="text-sm text-gray-400 px-1 space-y-1">
       <p>
-        Showing <span class="font-medium text-gray-600">{sensorData.length.toLocaleString()}</span> readings
+        Showing <span class="font-medium text-gray-600">{sensorData.length.toLocaleString()}</span> {resolutionSec > REPORT_SECONDS ? 'averages' : 'readings'}
         · <span class="font-medium text-gray-600">{new Date(sensorData[sensorData.length - 1].recTime).toLocaleString()}</span>
         → <span class="font-medium text-gray-600">{new Date(sensorData[0].recTime).toLocaleString()}</span>
         {#if lastUpdated}
@@ -809,6 +885,9 @@
           </button>
         {:else}
           <span>Drag across a chart to zoom in on part of it.</span>
+        {/if}
+        {#if shownResolution > REPORT_SECONDS}
+          <span class="text-gray-600" data-testid="resolution-note">Showing {resolutionLabel(shownResolution)} averages{zoomRange ? '' : ' to fit this range; zoom in to see every reading'}.</span>
         {/if}
       </p>
       </div>
@@ -960,7 +1039,7 @@
 
         <div class="flex items-center gap-3 pb-5 border-b border-gray-100">
           <button
-            on:click={generateOverlay}
+            on:click={() => generateOverlay(zoomRange)}
             disabled={overlayLocations.length === 0 || (overlayMetrics.length === 0 && overlayMetricsRight.length === 0) || overlayLoading}
             class="px-5 py-2 rounded-lg text-sm font-semibold bg-slate-700 text-white hover:bg-slate-800 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
           >
